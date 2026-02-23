@@ -4,19 +4,66 @@ const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 
 /**
- * Extract playlist ID from a YouTube playlist URL
+ * Extract playlist ID from a YouTube playlist URL (returns null if not a playlist)
  */
 function extractPlaylistId(url) {
     const match = url.match(/[?&]list=([^&]+)/);
-    if (!match) throw new Error('Invalid YouTube playlist URL');
-    return match[1];
+    return match ? match[1] : null;
 }
 
 /**
- * Fetch all video IDs and titles from a YouTube playlist
+ * Extract video ID from any YouTube video URL
+ * Supports: youtube.com/watch?v=, youtu.be/, youtube.com/shorts/, youtube.com/embed/
  */
-export async function fetchPlaylistVideos(playlistUrl) {
-    const playlistId = extractPlaylistId(playlistUrl);
+function extractVideoId(url) {
+    const patterns = [
+        /(?:youtube\.com\/watch\?.*v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
+        /[?&]v=([a-zA-Z0-9_-]{11})/,
+    ];
+    for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+    }
+    return null;
+}
+
+/**
+ * Fetch video title from YouTube page (no API key needed)
+ */
+async function fetchVideoTitle(videoId) {
+    try {
+        const res = await axios.get(`https://www.youtube.com/watch?v=${videoId}`, {
+            headers: { 'Accept-Language': 'en' },
+        });
+        const titleMatch = res.data.match(/<title>(.*?)<\/title>/);
+        if (titleMatch) {
+            return titleMatch[1].replace(' - YouTube', '').trim();
+        }
+    } catch (e) {
+        console.warn(`[YouTube] Failed to fetch title for ${videoId}:`, e.message);
+    }
+    return `Video ${videoId}`;
+}
+
+/**
+ * Fetch all video IDs and titles from a YouTube URL.
+ * Handles both playlist URLs and single video URLs.
+ */
+export async function fetchPlaylistVideos(inputUrl) {
+    const playlistId = extractPlaylistId(inputUrl);
+    const videoId = extractVideoId(inputUrl);
+
+    // --- Single video URL (no playlist) ---
+    if (!playlistId && videoId) {
+        console.log(`[YouTube] Single video detected: ${videoId}`);
+        const title = await fetchVideoTitle(videoId);
+        return [{ videoId, title }];
+    }
+
+    // --- Playlist URL ---
+    if (!playlistId) {
+        throw new Error('Could not extract a video or playlist ID from the URL. Please paste a valid YouTube link.');
+    }
 
     // If no API key, return demo data
     if (!YOUTUBE_API_KEY) {
@@ -90,7 +137,9 @@ export async function fetchTranscript(videoId) {
                         .replace(/&#39;/g, "'")
                     );
                 }
-                return segments.join(' ');
+                if (segments.length > 0) {
+                    return segments.join(' ');
+                }
             }
         }
     } catch (e) {
