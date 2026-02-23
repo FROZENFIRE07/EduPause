@@ -1,0 +1,23 @@
+{
+    "name": "mastery-os-backend",
+    "version": "1.0.0",
+    "description": "Agentic Learning OS — Node.js Backend",
+    "type": "module",
+    "main": "src/server.js",
+    "scripts": {
+        "start": "node src/server.js",
+        "dev": "node --watch src/server.js"
+    },
+    "dependencies": {
+        "express": "^4.21.0",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "axios": "^1.7.0",
+        "mongodb": "^6.9.0",
+        "neo4j-driver": "^5.25.0",
+        "@qdrant/js-client-rest": "^1.12.0",
+        "@xenova/transformers": "^2.17.0",
+        "groq-sdk": "^0.8.0",
+        "uuid": "^10.0.0"
+    }
+}
