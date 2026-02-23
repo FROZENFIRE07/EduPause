@@ -44,20 +44,22 @@ router.get('/status/:jobId', (req, res) => {
 
 async function runIngestionPipeline(jobId, playlistUrl) {
     const job = jobs.get(jobId);
+    let videos = [];
+    let transcripts = [];
+    let allChunks = [];
+    let allConcepts = [];
 
     try {
         // Step 1: Fetch playlist metadata
         job.step = 1;
         job.details = 'Fetching playlist metadata...';
-        const videos = await fetchPlaylistVideos(playlistUrl);
+        videos = await fetchPlaylistVideos(playlistUrl);
         job.videoCount = videos.length;
-        // Store videos in job so frontend can access via status endpoint
         job.videos = videos.map(v => ({ videoId: v.videoId, title: v.title }));
 
         // Step 2: Extract transcripts
         job.step = 2;
         job.details = 'Extracting transcripts...';
-        const transcripts = [];
         for (const video of videos) {
             try {
                 const transcript = await fetchTranscript(video.videoId);
@@ -68,68 +70,83 @@ async function runIngestionPipeline(jobId, playlistUrl) {
             }
         }
 
-        // Step 3: Chunk + Summarize
+        // Step 3: Chunk + Summarize (graceful — skip on failure)
         job.step = 3;
         job.details = 'Chunking & summarizing with AI...';
-        const allChunks = [];
-        for (const video of transcripts) {
-            if (!video.transcript) continue;
-            const chunks = chunkTranscript(video.transcript, { chunkSize: 512, overlap: 50 });
-            for (let i = 0; i < chunks.length; i++) {
-                const summary = await summarizeChunk(chunks[i], video.title);
-                allChunks.push({
-                    videoId: video.videoId,
-                    videoTitle: video.title,
-                    chunkIndex: i,
-                    text: chunks[i],
-                    summary,
-                });
+        try {
+            for (const video of transcripts) {
+                if (!video.transcript) continue;
+                const chunks = chunkTranscript(video.transcript, { chunkSize: 512, overlap: 50 });
+                for (let i = 0; i < chunks.length; i++) {
+                    const summary = await summarizeChunk(chunks[i], video.title);
+                    allChunks.push({
+                        videoId: video.videoId,
+                        videoTitle: video.title,
+                        chunkIndex: i,
+                        text: chunks[i],
+                        summary,
+                    });
+                }
             }
+        } catch (e) {
+            console.warn('[Ingestion] Step 3 (Chunk/Summarize) failed:', e.message);
         }
 
-        // Step 4: Extract concepts → Knowledge Graph
+        // Step 4: Extract concepts → Knowledge Graph (graceful)
         job.step = 4;
         job.details = 'Building knowledge graph...';
-        const allConcepts = [];
-        for (const chunk of allChunks) {
-            const concepts = await extractConcepts(chunk.summary);
-            allConcepts.push(...concepts);
+        try {
+            for (const chunk of allChunks) {
+                const concepts = await extractConcepts(chunk.summary);
+                allConcepts.push(...concepts);
+            }
+            await writeConceptsToGraph(allConcepts);
+        } catch (e) {
+            console.warn('[Ingestion] Step 4 (Knowledge Graph) failed:', e.message);
         }
-        await writeConceptsToGraph(allConcepts);
 
-        // Step 5: Embed & store
+        // Step 5: Embed & store (graceful)
         job.step = 5;
         job.details = 'Generating embeddings & storing...';
-        const texts = allChunks.map(c => c.summary);
-        const embeddings = await embedBatch(texts);
-        const vectors = allChunks.map((c, i) => ({
-            id: `${c.videoId}-chunk-${c.chunkIndex}`,
-            vector: embeddings[i],
-            payload: {
-                videoId: c.videoId,
-                videoTitle: c.videoTitle,
-                chunkIndex: c.chunkIndex,
-                summary: c.summary,
-            },
-        }));
-        await upsertVectors(vectors);
+        try {
+            const texts = allChunks.map(c => c.summary);
+            const embeddings = await embedBatch(texts);
+            const vectors = allChunks.map((c, i) => ({
+                id: `${c.videoId}-chunk-${c.chunkIndex}`,
+                vector: embeddings[i],
+                payload: {
+                    videoId: c.videoId,
+                    videoTitle: c.videoTitle,
+                    chunkIndex: c.chunkIndex,
+                    summary: c.summary,
+                },
+            }));
+            await upsertVectors(vectors);
+        } catch (e) {
+            console.warn('[Ingestion] Step 5 (Embeddings) failed:', e.message);
+        }
 
-        // Save to MongoDB
-        const db = await getDB();
-        await db.collection('playlists').insertOne({
-            playlistUrl,
-            videos: transcripts.map(v => ({ videoId: v.videoId, title: v.title })),
-            chunkCount: allChunks.length,
-            conceptCount: allConcepts.length,
-            ingestedAt: new Date(),
-        });
+        // Save to MongoDB (graceful)
+        try {
+            const db = await getDB();
+            await db.collection('playlists').insertOne({
+                playlistUrl,
+                videos: transcripts.map(v => ({ videoId: v.videoId, title: v.title })),
+                chunkCount: allChunks.length,
+                conceptCount: allConcepts.length,
+                ingestedAt: new Date(),
+            });
+        } catch (e) {
+            console.warn('[Ingestion] MongoDB save failed:', e.message);
+        }
 
         job.status = 'complete';
         job.details = `Ingested ${videos.length} videos, ${allChunks.length} chunks, ${allConcepts.length} concepts.`;
     } catch (err) {
+        console.error('[Ingestion] Pipeline failed:', err.message);
         job.status = 'error';
         job.error = err.message;
-        throw err;
+        // Do NOT re-throw — we don't want to crash the server
     }
 }
 

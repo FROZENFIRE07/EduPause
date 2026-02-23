@@ -67,10 +67,14 @@ export default function PlaylistImport() {
             }
 
             // Poll for ingestion status
+            let pollFailCount = 0;
+            const MAX_POLL_FAILURES = 5;
+
             pollingRef.current = setInterval(async () => {
                 try {
                     const statusRes = await getIngestionStatus(jobId);
                     const job = statusRes.data;
+                    pollFailCount = 0; // Reset on success
 
                     // Update pipeline step (backend steps are 1-indexed, UI is 0-indexed)
                     setCurrentStep(Math.max(0, (job.step || 1) - 1));
@@ -84,9 +88,7 @@ export default function PlaylistImport() {
                         setCurrentStep(PIPELINE_STEPS.length);
 
                         // Extract video data from job for navigation
-                        // The backend stores videos in the job response
                         const videos = job.videos || [];
-                        // Store in sessionStorage for the learning page
                         sessionStorage.setItem('masteryos_playlist', JSON.stringify({
                             playlistUrl,
                             videos,
@@ -100,7 +102,15 @@ export default function PlaylistImport() {
                         setIsIngesting(false);
                     }
                 } catch (pollErr) {
-                    console.error('[Poll Error]', pollErr);
+                    pollFailCount++;
+                    console.error(`[Poll Error ${pollFailCount}/${MAX_POLL_FAILURES}]`, pollErr.message);
+
+                    if (pollFailCount >= MAX_POLL_FAILURES) {
+                        clearInterval(pollingRef.current);
+                        pollingRef.current = null;
+                        setError('Lost connection to backend. The server may have restarted. Please try again.');
+                        setIsIngesting(false);
+                    }
                 }
             }, 2000);
 
