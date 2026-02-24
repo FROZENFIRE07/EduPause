@@ -45,6 +45,11 @@ class AgentState(TypedDict, total=False):
     user_answer: str               # User's response to intervention
     current_concept: str           # Currently active concept
     
+    # Transcript context (from Node.js backend enrichment)
+    transcript_context: str        # The relevant lecture text at the user's playback position
+    video_id: str                  # Current video being watched
+    video_timestamp: float         # Current playback position in seconds
+    
     # Mastery tracking
     mastery_scores: dict[str, float]   # concept_id -> score (0-100)
     

@@ -1,0 +1,32 @@
+.progress-ring-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.progress-ring-wrapper.glow {
+    filter: drop-shadow(0 0 12px var(--accent-primary-glow));
+}
+
+.progress-ring-label {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.progress-ring-value {
+    font-size: 1.4rem;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.progress-ring-sublabel {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}

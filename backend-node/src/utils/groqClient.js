@@ -1,4 +1,5 @@
 import Groq from 'groq-sdk';
+import { log } from './logger.js';
 
 const client = new Groq({
     apiKey: process.env.GROQ_API_KEY || 'demo-key',
@@ -8,12 +9,24 @@ const MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
 /**
  * Summarize a transcript chunk using Groq LLM
+ * @param {string} chunkText
+ * @param {string} videoTitle
+ * @param {object} [timeRange] - { startTime, endTime } e.g. { startTime: '00:02:15', endTime: '00:05:30' }
  */
-export async function summarizeChunk(chunkText, videoTitle = '') {
+export async function summarizeChunk(chunkText, videoTitle = '', timeRange = null) {
+    const timeLabel = timeRange ? ` [${timeRange.startTime}–${timeRange.endTime}]` : '';
+
     if (!process.env.GROQ_API_KEY) {
-        // Demo fallback
-        return `Summary of chunk from "${videoTitle}": ${chunkText.substring(0, 200)}...`;
+        log('🤖', 'GROQ', `summarizeChunk [MOCK] — "${videoTitle}"${timeLabel} (${chunkText.length} chars)`);
+        return `Summary of chunk from "${videoTitle}"${timeLabel}: ${chunkText.substring(0, 200)}...`;
     }
+
+    log('🤖', 'GROQ', `summarizeChunk [${MODEL}] — "${videoTitle}"${timeLabel} (${chunkText.length} chars)`);
+    const start = Date.now();
+
+    const timeContext = timeRange
+        ? `\nThis chunk covers video timestamps ${timeRange.startTime} to ${timeRange.endTime}. Reference these timestamps in your summary.`
+        : '';
 
     const response = await client.chat.completions.create({
         model: MODEL,
@@ -23,80 +36,116 @@ export async function summarizeChunk(chunkText, videoTitle = '') {
                 content: `You are an expert educational content summarizer. Create a rich, detailed summary that:
 - Preserves technical precision (formulas, steps, definitions)
 - Notes prerequisites explicitly
-- Includes approximate timestamps when available
+- References video timestamps when provided
 - Uses clear, educational tone
 - Target length: 20-35% of the original
 - Always highlight key concepts in bold`
             },
             {
                 role: 'user',
-                content: `Summarize this transcript chunk from the video "${videoTitle}":\n\n${chunkText}`
+                content: `Summarize this transcript chunk from the video "${videoTitle}":${timeContext}\n\n${chunkText}`
             }
         ],
         temperature: 0.3,
         max_tokens: 800,
     });
 
-    return response.choices[0]?.message?.content || '';
+    const elapsed = Date.now() - start;
+    const content = response.choices[0]?.message?.content || '';
+    const usage = response.usage;
+    log('✅', 'GROQ', `summarizeChunk done [${elapsed}ms] — tokens: ${usage?.total_tokens || '?'} output: ${content.length} chars`);
+
+    return content;
 }
 
 /**
  * Extract concepts and prerequisite relationships from a summary
- * Returns: [{ concept, prerequisites: [string], definitions: string }]
+ * @param {string} summaryText
+ * @param {object} [anchor] - { videoId, startTime, endTime } to attach to each concept
+ * @param {string[]} [existingConcepts] - concept IDs already extracted (for deduplication)
  */
-export async function extractConcepts(summaryText) {
+export async function extractConcepts(summaryText, anchor = null, existingConcepts = []) {
     if (!process.env.GROQ_API_KEY) {
-        // Demo: extract simple concept-like phrases
+        log('🤖', 'GROQ', `extractConcepts [MOCK] — (${summaryText.length} chars)`);
         const words = summaryText.split(/\s+/);
         const concepts = [];
         for (let i = 0; i < words.length - 1; i += 15) {
             concepts.push({
                 concept: words.slice(i, i + 2).join(' '),
+                parentConcept: null,
                 prerequisites: [],
                 definition: '',
+                ...(anchor || {}),
             });
         }
-        return concepts.slice(0, 3);
+        return concepts.slice(0, 2);
     }
+
+    log('🤖', 'GROQ', `extractConcepts [${MODEL}] — (${summaryText.length} chars, ${existingConcepts.length} existing)`);
+    const start = Date.now();
+
+    const existingNote = existingConcepts.length > 0
+        ? `\n\nAlready extracted concepts (DO NOT repeat these): ${existingConcepts.join(', ')}`
+        : '';
 
     const response = await client.chat.completions.create({
         model: MODEL,
         messages: [
             {
                 role: 'system',
-                content: `You are a knowledge graph extractor for educational content. Extract concepts and their prerequisite relationships.
+                content: `You are a knowledge graph extractor for educational content. Extract ONLY the most important, high-level concepts.
 
 Output strict JSON array with this schema:
 [
   {
-    "concept": "concept name (lowercase, hyphenated)",
+    "concept": "concept-id (lowercase, hyphenated)",
     "label": "Human Readable Label",
-    "prerequisites": ["prerequisite-concept-1", "prerequisite-concept-2"],
+    "parentConcept": "parent-concept-id or null",
+    "prerequisites": ["prerequisite-concept-1"],
     "definition": "One-line definition"
   }
 ]
 
-Rules:
-- Extract only domain-specific academic concepts, not generic terms
-- Prerequisites must be concepts that logically must be understood BEFORE this concept
+Critical Rules:
+- Extract ONLY 2-4 core concepts per chunk — quality over quantity
+- Focus on BROAD, meaningful concepts, NOT fine-grained terms
+  ✗ Bad: "sigmoid-function", "tanh-function", "relu-function" (too granular)
+  ✓ Good: "activation-functions" (the parent concept)
+- Use parentConcept to group: if a specific concept is a subtype of a broader concept, set parentConcept to the broader one (e.g. "sigmoid-function" → parentConcept: "activation-functions")
+- Prerequisites = concepts that MUST be understood BEFORE this one
 - Use consistent naming (lowercase, hyphenated: "gradient-descent", "chain-rule")
-- Limit to 3-6 concepts per chunk
-- Evaluate prerequisite direction carefully - A → B means A must be known before B`
+- Skip generic terms like "example", "introduction", "overview", "summary"
+- Skip concepts already in the existing list`
             },
             {
                 role: 'user',
-                content: `Extract concepts and prerequisites from:\n\n${summaryText}`
+                content: `Extract the core concepts from:\n\n${summaryText}${existingNote}`
             }
         ],
         temperature: 0.2,
-        max_tokens: 600,
+        max_tokens: 500,
         response_format: { type: 'json_object' },
     });
 
+    const elapsed = Date.now() - start;
+
     try {
         const parsed = JSON.parse(response.choices[0]?.message?.content || '{}');
-        return Array.isArray(parsed) ? parsed : (parsed.concepts || []);
+        let concepts = Array.isArray(parsed) ? parsed : (parsed.concepts || []);
+        // Ensure parentConcept field exists
+        concepts = concepts.map(c => ({
+            ...c,
+            parentConcept: c.parentConcept || null,
+            ...(anchor || {}),
+        }));
+        // Filter out any that duplicate existing concepts
+        if (existingConcepts.length > 0) {
+            concepts = concepts.filter(c => !existingConcepts.includes(c.concept));
+        }
+        log('✅', 'GROQ', `extractConcepts done [${elapsed}ms] — ${concepts.length} concepts extracted`);
+        return concepts;
     } catch {
+        log('⚠️', 'GROQ', `extractConcepts parse failed [${elapsed}ms]`);
         return [];
     }
 }
@@ -106,6 +155,7 @@ Rules:
  */
 export async function generateSocraticQuestion(concept, context) {
     if (!process.env.GROQ_API_KEY) {
+        log('🤖', 'GROQ', `generateSocraticQuestion [MOCK] — concept="${concept}"`);
         return {
             type: 'mcq',
             question: `What is the key principle behind ${concept}?`,
@@ -114,6 +164,9 @@ export async function generateSocraticQuestion(concept, context) {
             hint: `Think about the fundamental definition of ${concept}.`,
         };
     }
+
+    log('🤖', 'GROQ', `generateSocraticQuestion [${MODEL}] — concept="${concept}"`);
+    const start = Date.now();
 
     const response = await client.chat.completions.create({
         model: MODEL,
@@ -142,9 +195,14 @@ Output JSON:
         response_format: { type: 'json_object' },
     });
 
+    const elapsed = Date.now() - start;
+
     try {
-        return JSON.parse(response.choices[0]?.message?.content || '{}');
+        const result = JSON.parse(response.choices[0]?.message?.content || '{}');
+        log('✅', 'GROQ', `generateSocraticQuestion done [${elapsed}ms] — type=${result.type}`);
+        return result;
     } catch {
+        log('⚠️', 'GROQ', `generateSocraticQuestion parse failed [${elapsed}ms]`);
         return { type: 'text', question: `Explain ${concept} in your own words.` };
     }
 }

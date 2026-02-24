@@ -37,7 +37,22 @@ export const getAgentResponse = (sessionId) =>
   api.get(`/agent/response/${sessionId}`);
 
 // Knowledge Graph
-export const getKnowledgeGraph = (playlistId) =>
-  api.get(`/graph/${playlistId}`);
+export const getKnowledgeGraph = (playlistId, videoId = null) => {
+  const params = {};
+  if (videoId) params.videoId = videoId;
+  return api.get(`/graph/${playlistId}`, { params });
+};
+
+// Transcripts
+export const getTranscript = (videoId) =>
+  api.get(`/transcript/${videoId}`);
+
+// Search
+export const searchContent = (query, type = 'all') =>
+  api.get('/search', { params: { q: query, type } });
+
+// Playlist videos
+export const getPlaylistVideos = (playlistId) =>
+  api.get(`/playlist/${playlistId}/videos`);
 
 export default api;

@@ -1,4 +1,5 @@
 import { MongoClient } from 'mongodb';
+import { log } from './logger.js';
 
 const MONGO_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const DB_NAME = process.env.MONGODB_DB || 'mastery_os';
@@ -14,20 +15,22 @@ export async function getDB() {
     if (db) return db;
 
     try {
+        log('🔌', 'MONGODB', `Connecting to ${DB_NAME}...`);
         client = new MongoClient(MONGO_URI);
         await client.connect();
         db = client.db(DB_NAME);
-        console.log(`[MongoDB] Connected to ${DB_NAME}`);
+        log('✅', 'MONGODB', `Connected to ${DB_NAME}`);
 
         // Create indexes
         await db.collection('sessions').createIndex({ sessionId: 1 }, { unique: true });
         await db.collection('clickstream').createIndex({ sessionId: 1, receivedAt: -1 });
         await db.collection('playlists').createIndex({ playlistUrl: 1 });
+        log('📇', 'MONGODB', `Indexes created for sessions, clickstream, playlists`);
 
         return db;
     } catch (err) {
-        console.warn('[MongoDB] Connection failed:', err.message);
-        console.warn('[MongoDB] Using in-memory mock');
+        log('⚠️', 'MONGODB', `Connection failed: ${err.message}`);
+        log('📦', 'MONGODB', `Using in-memory mock store`);
 
         // In-memory mock for demo
         const mockCollections = {};
@@ -67,6 +70,7 @@ export async function getDB() {
  */
 export async function closeDB() {
     if (client) {
+        log('🔌', 'MONGODB', `Closing connection...`);
         await client.close();
         client = null;
         db = null;

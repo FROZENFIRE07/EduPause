@@ -1,6 +1,8 @@
-import { useEffect, useRef, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Network } from 'vis-network';
 import { DataSet } from 'vis-data';
+import { getKnowledgeGraph } from '../api';
 import './SkillGraph.css';
 
 const MASTERY_COLORS = {
@@ -11,6 +13,20 @@ const MASTERY_COLORS = {
     mastered: { bg: '#fbbf24', border: '#f59e0b', font: '#1a1f35' },
 };
 
+// Vibrant colors for nodes when no mastery data exists
+const NODE_COLORS = [
+    { bg: '#6366f1', border: '#818cf8', font: '#ffffff' },   // indigo
+    { bg: '#06b6d4', border: '#22d3ee', font: '#ffffff' },   // cyan
+    { bg: '#10b981', border: '#34d399', font: '#ffffff' },   // emerald
+    { bg: '#f59e0b', border: '#fbbf24', font: '#1a1f35' },   // amber
+    { bg: '#ec4899', border: '#f472b6', font: '#ffffff' },   // pink
+    { bg: '#8b5cf6', border: '#a78bfa', font: '#ffffff' },   // violet
+    { bg: '#14b8a6', border: '#2dd4bf', font: '#ffffff' },   // teal
+    { bg: '#f97316', border: '#fb923c', font: '#ffffff' },   // orange
+    { bg: '#ef4444', border: '#f87171', font: '#ffffff' },   // red
+    { bg: '#84cc16', border: '#a3e635', font: '#1a1f35' },   // lime
+];
+
 function getMasteryLevel(score) {
     if (score >= 90) return 'mastered';
     if (score >= 70) return 'advanced';
@@ -19,91 +35,86 @@ function getMasteryLevel(score) {
     return 'none';
 }
 
-export default function SkillGraph({ concepts = [], edges = [], masteryScores = {} }) {
+export default function SkillGraph({ playlistId, videoId, masteryScores = {} }) {
     const containerRef = useRef(null);
     const networkRef = useRef(null);
+    const [concepts, setConcepts] = useState([]);
+    const [edges, setEdges] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [selectedNode, setSelectedNode] = useState(null);
 
-    // Sample data if none provided
-    const sampleConcepts = useMemo(() => concepts.length > 0 ? concepts : [
-        { id: 'linear-algebra', label: 'Linear Algebra' },
-        { id: 'derivatives', label: 'Derivatives' },
-        { id: 'chain-rule', label: 'Chain Rule' },
-        { id: 'gradient-descent', label: 'Gradient Descent' },
-        { id: 'neural-networks', label: 'Neural Networks' },
-        { id: 'backpropagation', label: 'Backpropagation' },
-        { id: 'loss-functions', label: 'Loss Functions' },
-        { id: 'activation-functions', label: 'Activation Functions' },
-        { id: 'optimizers', label: 'Optimizers' },
-        { id: 'regularization', label: 'Regularization' },
-        { id: 'cnn', label: 'CNNs' },
-        { id: 'rnn', label: 'RNNs' },
-    ], [concepts]);
+    const hasMastery = Object.keys(masteryScores).length > 0;
 
-    const sampleEdges = useMemo(() => edges.length > 0 ? edges : [
-        { from: 'linear-algebra', to: 'neural-networks' },
-        { from: 'derivatives', to: 'chain-rule' },
-        { from: 'chain-rule', to: 'backpropagation' },
-        { from: 'gradient-descent', to: 'backpropagation' },
-        { from: 'derivatives', to: 'gradient-descent' },
-        { from: 'neural-networks', to: 'backpropagation' },
-        { from: 'loss-functions', to: 'gradient-descent' },
-        { from: 'activation-functions', to: 'neural-networks' },
-        { from: 'backpropagation', to: 'optimizers' },
-        { from: 'neural-networks', to: 'cnn' },
-        { from: 'neural-networks', to: 'rnn' },
-        { from: 'optimizers', to: 'regularization' },
-    ], [edges]);
-
-    const sampleMastery = useMemo(() => Object.keys(masteryScores).length > 0 ? masteryScores : {
-        'linear-algebra': 92,
-        'derivatives': 85,
-        'chain-rule': 72,
-        'gradient-descent': 55,
-        'neural-networks': 40,
-        'backpropagation': 15,
-        'loss-functions': 60,
-        'activation-functions': 78,
-        'optimizers': 0,
-        'regularization': 0,
-        'cnn': 5,
-        'rnn': 0,
-    }, [masteryScores]);
-
+    // Fetch real graph data from API
     useEffect(() => {
-        if (!containerRef.current) return;
+        let cancelled = false;
+
+        async function fetchGraph() {
+            const pid = playlistId || 'default';
+            setLoading(true);
+            try {
+                const res = await getKnowledgeGraph(pid, videoId || null);
+                if (cancelled) return;
+                setConcepts(res.data?.concepts || []);
+                setEdges(res.data?.edges || []);
+            } catch {
+                if (cancelled) return;
+                setConcepts([]);
+                setEdges([]);
+            }
+            setLoading(false);
+        }
+
+        fetchGraph();
+        return () => { cancelled = true; };
+    }, [playlistId, videoId]);
+
+    // Render vis-network when data changes
+    useEffect(() => {
+        if (!containerRef.current || concepts.length === 0) return;
 
         const nodes = new DataSet(
-            sampleConcepts.map(c => {
-                const score = sampleMastery[c.id] || 0;
-                const level = getMasteryLevel(score);
-                const colors = MASTERY_COLORS[level];
+            concepts.map((c, idx) => {
+                const isParent = c.childCount > 0;
+                let colors;
+
+                if (hasMastery) {
+                    const score = masteryScores[c.id] || 0;
+                    const level = getMasteryLevel(score);
+                    colors = MASTERY_COLORS[level];
+                } else {
+                    // Assign vibrant per-node colors
+                    colors = NODE_COLORS[idx % NODE_COLORS.length];
+                }
+
                 return {
                     id: c.id,
-                    label: `${c.label}\n${score}%`,
-                    shape: 'box',
+                    label: c.label,
+                    title: c.definition || c.label,
+                    shape: 'dot',
                     color: {
                         background: colors.bg,
                         border: colors.border,
-                        highlight: { background: colors.border, border: colors.font },
-                        hover: { background: colors.border, border: colors.font },
+                        highlight: { background: colors.border, border: '#ffffff' },
+                        hover: { background: colors.border, border: '#ffffff' },
                     },
                     font: {
-                        color: colors.font,
-                        size: 13,
+                        color: '#e0e0f0',
+                        size: isParent ? 14 : 12,
                         face: 'Inter, sans-serif',
-                        multi: 'md',
-                        bold: { color: colors.font, size: 14 },
+                        strokeWidth: 3,
+                        strokeColor: '#0a0a14',
                     },
-                    borderWidth: score >= 90 ? 3 : 2,
-                    shadow: score >= 70 ? { enabled: true, color: colors.border, size: 12 } : false,
-                    size: 20 + score * 0.15,
-                    mass: 1 + score * 0.01,
+                    borderWidth: isParent ? 3 : 2,
+                    shadow: { enabled: true, color: colors.bg + '80', size: 15 },
+                    size: isParent ? 28 : 18 + Math.random() * 8,
+                    mass: isParent ? 1.5 : 1,
                 };
             })
         );
 
         const edgeData = new DataSet(
-            sampleEdges.map((e, i) => ({
+            edges.map((e, i) => ({
                 id: `e-${i}`,
                 from: e.from,
                 to: e.to,
@@ -144,15 +155,53 @@ export default function SkillGraph({ concepts = [], edges = [], masteryScores = 
 
         networkRef.current = new Network(containerRef.current, { nodes, edges: edgeData }, options);
 
+        // Click handler for parent nodes — show children in panel
+        networkRef.current.on('click', (params) => {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                const concept = concepts.find(c => c.id === nodeId);
+                setSelectedNode(concept || null);
+            } else {
+                setSelectedNode(null);
+            }
+        });
+
         return () => {
             networkRef.current?.destroy();
         };
-    }, [sampleConcepts, sampleEdges, sampleMastery]);
+    }, [concepts, edges, masteryScores]);
+
+    // Empty state
+    if (!loading && concepts.length === 0) {
+        return (
+            <div className="skill-graph-wrapper">
+                <div className="skill-graph-empty">
+                    <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>🗺️</div>
+                    <h3 className="heading-md" style={{ marginBottom: 8 }}>No knowledge map yet</h3>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: 16, fontSize: '0.85rem' }}>
+                        Import a playlist to build your learning knowledge graph.
+                    </p>
+                    <Link to="/" className="btn btn-primary">Import a Playlist</Link>
+                </div>
+            </div>
+        );
+    }
+
+    if (loading) {
+        return (
+            <div className="skill-graph-wrapper">
+                <div className="skill-graph-empty">
+                    <p style={{ color: 'var(--text-muted)' }}>Loading knowledge map...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="skill-graph-wrapper">
             <div className="skill-graph-header">
                 <h3 className="heading-md">Knowledge Map</h3>
+                <span className="sg-concept-count">{concepts.length} concepts</span>
                 <div className="legend">
                     {Object.entries(MASTERY_COLORS).map(([level, colors]) => (
                         <div key={level} className="legend-item">
@@ -162,7 +211,36 @@ export default function SkillGraph({ concepts = [], edges = [], masteryScores = 
                     ))}
                 </div>
             </div>
-            <div ref={containerRef} className="skill-graph-canvas" />
+            <div className="sg-body">
+                <div ref={containerRef} className="skill-graph-canvas" />
+                {selectedNode && (
+                    <div className="sg-panel">
+                        <div className="sg-panel-top">
+                            <h4>{selectedNode.label}</h4>
+                            <button className="sg-panel-close" onClick={() => setSelectedNode(null)}>✕</button>
+                        </div>
+                        {selectedNode.definition && (
+                            <p className="sg-panel-desc">{selectedNode.definition}</p>
+                        )}
+                        {selectedNode.children && selectedNode.children.length > 0 && (
+                            <div className="sg-panel-children">
+                                <span className="sg-panel-children-label">Sub-concepts</span>
+                                {selectedNode.children.map(child => (
+                                    <div key={child.id} className="sg-panel-child">
+                                        <span className="sg-panel-child-dot" />
+                                        <span>{child.label}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {selectedNode.videoId && (
+                            <div className="sg-panel-meta">
+                                From video: {selectedNode.videoId.substring(0, 8)}...
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

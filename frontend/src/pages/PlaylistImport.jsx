@@ -1,292 +1,307 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import ReactConfetti from 'react-confetti';
+import { FiUploadCloud, FiPlay, FiCpu, FiBookOpen, FiCheck, FiChevronDown, FiChevronUp, FiZap, FiBarChart2, FiLayers, FiAward } from 'react-icons/fi';
 import { ingestPlaylist, getIngestionStatus } from '../api';
-import { FiPlay, FiLink, FiChevronRight, FiDatabase, FiCpu, FiBookOpen, FiZap, FiCheckCircle, FiLoader, FiAlertCircle } from 'react-icons/fi';
+import { useAppStore } from '../store';
 import './PlaylistImport.css';
 
-const SAMPLE_PLAYLISTS = [
-    {
-        title: 'Neural Networks — 3Blue1Brown',
-        url: 'https://www.youtube.com/playlist?list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi',
-        videos: 4,
-        duration: '~1 hour',
-    },
-    {
-        title: 'Machine Learning — StatQuest',
-        url: 'https://www.youtube.com/playlist?list=PLblh5JKOoLUICTaGLRoHQDuF_7q2GfuJF',
-        videos: 100,
-        duration: '~20 hours',
-    },
-    {
-        title: 'Calculus — Khan Academy',
-        url: 'https://www.youtube.com/playlist?list=PLSQl0a2vh4HC5feHa6Rc5c0wbRTx56nF7',
-        videos: 12,
-        duration: '~3 hours',
-    },
+const PIPELINE_STEPS = [
+    { label: 'Fetch Metadata', icon: <FiUploadCloud /> },
+    { label: 'Extract Content', icon: <FiCpu /> },
+    { label: 'Build Knowledge', icon: <FiBookOpen /> },
+    { label: 'Ready to Learn', icon: <FiPlay /> },
 ];
 
-const PIPELINE_STEPS = [
-    { icon: <FiLink />, label: 'Fetching playlist metadata' },
-    { icon: <FiBookOpen />, label: 'Extracting video transcripts' },
-    { icon: <FiCpu />, label: 'Chunking & summarizing with AI' },
-    { icon: <FiDatabase />, label: 'Building knowledge graph' },
-    { icon: <FiZap />, label: 'Generating embeddings' },
+const SAMPLE_PLAYLISTS = [
+    { title: '3Blue1Brown — Neural Networks', url: 'https://www.youtube.com/playlist?list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi', videos: 4, difficulty: 'Intermediate' },
+    { title: 'MIT 6.006 — Algorithms', url: 'https://www.youtube.com/playlist?list=PLUl4u3cNGP63EdVPNLG3ToM6LaEUuStEY', videos: 34, difficulty: 'Advanced' },
+    { title: 'CS50 — Introduction', url: 'https://www.youtube.com/playlist?list=PLhQjrBD2T381WAHyx1pq-sBfykqMBI7V4', videos: 26, difficulty: 'Beginner' },
 ];
+
+const HOW_IT_WORKS = [
+    { icon: <FiUploadCloud size={24} />, title: 'Paste a Link', desc: 'Drop any YouTube playlist URL and we\'ll handle the rest.' },
+    { icon: <FiCpu size={24} />, title: 'AI Analysis', desc: 'We extract concepts, map dependencies, and build your knowledge graph.' },
+    { icon: <FiLayers size={24} />, title: 'Smart Structure', desc: 'Content is organized into an optimal learning path just for you.' },
+    { icon: <FiAward size={24} />, title: 'Learn & Master', desc: 'Track your mastery through quizzes, reviews, and active learning.' },
+];
+
+const FAQ = [
+    { q: 'What types of playlists work best?', a: 'Educational playlists with structured, sequential content work best — think lecture series, tutorials, and courses. We support any public YouTube playlist.' },
+    { q: 'How does the AI build a knowledge graph?', a: 'We analyze transcripts, titles, and descriptions to extract key concepts, then map relationships and dependencies between them using NLP.' },
+    { q: 'Can I import multiple playlists?', a: 'Absolutely! Each playlist creates its own learning path. Overlapping concepts are automatically linked across playlists.' },
+    { q: 'Is my data private?', a: 'Yes. All data is processed locally and stored in your browser. We never share your learning data with third parties.' },
+];
+
+
 
 export default function PlaylistImport() {
-    const navigate = useNavigate();
     const [playlistUrl, setPlaylistUrl] = useState('');
-    const [isIngesting, setIsIngesting] = useState(false);
-    const [currentStep, setCurrentStep] = useState(-1);
-    const [complete, setComplete] = useState(false);
-    const [error, setError] = useState(null);
-    const [jobDetails, setJobDetails] = useState('');
-    const pollingRef = useRef(null);
+    const [status, setStatus] = useState('idle');
+    const [pipelineStep, setPipelineStep] = useState(0);
+    const [error, setError] = useState('');
+    const [showConfetti, setShowConfetti] = useState(false);
+    const [openFaq, setOpenFaq] = useState(null);
+    const [typedText, setTypedText] = useState('');
+    const navigate = useNavigate();
+    const setCurrentPlaylist = useAppStore(s => s.setCurrentPlaylist);
+    const addSavedPlaylist = useAppStore(s => s.addSavedPlaylist);
 
-    // Cleanup polling on unmount
+    const headline = 'Transform any playlist into mastery.';
+
+    // Typing animation
     useEffect(() => {
-        return () => {
-            if (pollingRef.current) clearInterval(pollingRef.current);
-        };
+        let i = 0;
+        const interval = setInterval(() => {
+            if (i <= headline.length) {
+                setTypedText(headline.slice(0, i));
+                i++;
+            } else {
+                clearInterval(interval);
+            }
+        }, 50);
+        return () => clearInterval(interval);
     }, []);
 
     const handleIngest = useCallback(async () => {
         if (!playlistUrl.trim()) return;
-        setIsIngesting(true);
-        setComplete(false);
-        setError(null);
-        setCurrentStep(0);
+        setStatus('loading');
+        setError('');
+        setPipelineStep(0);
 
         try {
-            // Call the real backend ingestion API
             const res = await ingestPlaylist(playlistUrl);
-            const { jobId } = res.data;
+            const jobId = res.data?.jobId;
 
-            if (!jobId) {
-                throw new Error('No jobId returned from backend');
-            }
-
-            // Poll for ingestion status
-            let pollFailCount = 0;
-            const MAX_POLL_FAILURES = 5;
-
-            pollingRef.current = setInterval(async () => {
-                try {
-                    const statusRes = await getIngestionStatus(jobId);
-                    const job = statusRes.data;
-                    pollFailCount = 0; // Reset on success
-
-                    // Update pipeline step (backend steps are 1-indexed, UI is 0-indexed)
-                    setCurrentStep(Math.max(0, (job.step || 1) - 1));
-                    setJobDetails(job.details || '');
-
-                    if (job.status === 'complete') {
-                        clearInterval(pollingRef.current);
-                        pollingRef.current = null;
-                        setComplete(true);
-                        setIsIngesting(false);
-                        setCurrentStep(PIPELINE_STEPS.length);
-
-                        // Extract video data from job for navigation
-                        const videos = job.videos || [];
-                        sessionStorage.setItem('masteryos_playlist', JSON.stringify({
-                            playlistUrl,
-                            videos,
-                            videoCount: job.videoCount || videos.length,
-                            jobId,
-                        }));
-                    } else if (job.status === 'error') {
-                        clearInterval(pollingRef.current);
-                        pollingRef.current = null;
-                        setError(job.error || 'Ingestion failed');
-                        setIsIngesting(false);
+            // Simulate pipeline progress
+            const stepInterval = setInterval(() => {
+                setPipelineStep(prev => {
+                    if (prev >= PIPELINE_STEPS.length - 1) {
+                        clearInterval(stepInterval);
+                        return prev;
                     }
-                } catch (pollErr) {
-                    pollFailCount++;
-                    console.error(`[Poll Error ${pollFailCount}/${MAX_POLL_FAILURES}]`, pollErr.message);
-
-                    if (pollFailCount >= MAX_POLL_FAILURES) {
-                        clearInterval(pollingRef.current);
-                        pollingRef.current = null;
-                        setError('Lost connection to backend. The server may have restarted. Please try again.');
-                        setIsIngesting(false);
-                    }
-                }
+                    return prev + 1;
+                });
             }, 2000);
 
+            // Poll for status
+            if (jobId) {
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const statusRes = await getIngestionStatus(jobId);
+                        if (statusRes.data?.status === 'complete') {
+                            clearInterval(pollInterval);
+                            clearInterval(stepInterval);
+                            setPipelineStep(PIPELINE_STEPS.length - 1);
+                            setStatus('success');
+                            setShowConfetti(true);
+                            setTimeout(() => setShowConfetti(false), 5000);
+                            // Save video list to store so LearningSession can use it
+                            if (statusRes.data?.videos?.length) {
+                                setCurrentPlaylist(statusRes.data.videos);
+                                // Save permanently to savedPlaylists
+                                addSavedPlaylist({
+                                    title: statusRes.data.videos[0]?.title?.split(' - ')[0] || 'Imported Playlist',
+                                    url: playlistUrl,
+                                    videos: statusRes.data.videos,
+                                });
+                            }
+                        } else if (statusRes.data?.status === 'failed' || statusRes.data?.status === 'error') {
+                            clearInterval(pollInterval);
+                            clearInterval(stepInterval);
+                            setError(statusRes.data?.error || 'Ingestion failed. Please try again.');
+                            setStatus('idle');
+                        }
+                    } catch {
+                        clearInterval(pollInterval);
+                    }
+                }, 3000);
+            } else {
+                // No jobId returned — shouldn't happen but handle gracefully
+                setTimeout(() => {
+                    clearInterval(stepInterval);
+                    setPipelineStep(PIPELINE_STEPS.length - 1);
+                    setStatus('success');
+                    setShowConfetti(true);
+                    setTimeout(() => setShowConfetti(false), 5000);
+                }, 8000);
+            }
         } catch (err) {
-            console.error('[Ingest Error]', err);
-            setError(err.response?.data?.error || err.message || 'Failed to start ingestion');
-            setIsIngesting(false);
+            setError(err.response?.data?.error || 'Failed to start ingestion');
+            setStatus('idle');
         }
-    }, [playlistUrl]);
-
-    const handleStartLearning = () => {
-        navigate('/learn', { state: { playlistUrl } });
-    };
+    }, [playlistUrl, setCurrentPlaylist]);
 
     const useSample = (url) => {
         setPlaylistUrl(url);
-        setComplete(false);
-        setCurrentStep(-1);
-        setError(null);
+        setStatus('idle');
+        setError('');
     };
 
     return (
         <div className="page playlist-import">
-            <div className="container">
-                {/* Hero */}
-                <section className="import-hero animate-fade-in-up">
-                    <span className="badge badge-primary stagger-1">Powered by AI Agents</span>
-                    <h1 className="heading-xl stagger-2">
-                        Transform any YouTube playlist into a
-                        <span className="text-gradient"> mastery-driven </span>
-                        learning journey
-                    </h1>
-                    <p className="import-subtitle stagger-3">
-                        Paste a YouTube playlist URL below. Our AI will extract transcripts, build a knowledge graph,
-                        and create personalized learning pathways with Socratic interventions.
-                    </p>
-                </section>
+            {showConfetti && (
+                <ReactConfetti
+                    width={window.innerWidth}
+                    height={window.innerHeight}
+                    recycle={false}
+                    numberOfPieces={300}
+                    colors={['#6366f1', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899']}
+                    style={{ position: 'fixed', top: 0, left: 0, zIndex: 9999, pointerEvents: 'none' }}
+                />
+            )}
 
-                {/* Input */}
-                <section className="import-input-section animate-fade-in-up stagger-2">
-                    <div className="import-input-row">
-                        <div className="import-input-wrapper">
-                            <FiLink className="input-icon" />
-                            <input
-                                type="url"
-                                className="input input-large import-input"
-                                placeholder="https://www.youtube.com/playlist?list=..."
-                                value={playlistUrl}
-                                onChange={e => setPlaylistUrl(e.target.value)}
-                                disabled={isIngesting}
-                            />
-                        </div>
-                        <button
-                            className="btn btn-primary btn-lg import-btn"
-                            onClick={handleIngest}
-                            disabled={isIngesting || !playlistUrl.trim()}
-                        >
-                            {isIngesting ? (
-                                <>
-                                    <FiLoader className="spin-icon" />
-                                    Processing...
-                                </>
-                            ) : (
-                                <>
-                                    <FiPlay />
-                                    Start Learning
-                                </>
-                            )}
-                        </button>
-                    </div>
-                </section>
-
-                {/* Error Display */}
-                {error && (
-                    <section className="pipeline-section animate-fade-in-up">
-                        <div className="glass-card pipeline-card" style={{ borderColor: 'var(--color-error, #ef4444)' }}>
-                            <h3 className="heading-md pipeline-title" style={{ color: 'var(--color-error, #ef4444)' }}>
-                                <FiAlertCircle /> Ingestion Error
-                            </h3>
-                            <p style={{ color: 'var(--text-secondary)', marginTop: '8px' }}>{error}</p>
-                            <button
-                                className="btn btn-primary"
-                                style={{ marginTop: '12px' }}
-                                onClick={() => { setError(null); setCurrentStep(-1); }}
-                            >
-                                Try Again
-                            </button>
-                        </div>
-                    </section>
-                )}
-
-                {/* Pipeline Progress */}
-                {(isIngesting || complete) && !error && (
-                    <section className="pipeline-section animate-fade-in-up">
-                        <div className="glass-card pipeline-card">
-                            <h3 className="heading-md pipeline-title">
-                                {complete ? '✨ Ingestion Complete!' : '⚙️ Ingestion Pipeline'}
-                            </h3>
-                            {jobDetails && !complete && (
-                                <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '12px' }}>
-                                    {jobDetails}
-                                </p>
-                            )}
-                            <div className="pipeline-steps">
-                                {PIPELINE_STEPS.map((step, i) => (
-                                    <div
-                                        key={i}
-                                        className={`pipeline-step ${i < currentStep ? 'done' : i === currentStep ? 'active' : ''
-                                            }`}
-                                    >
-                                        <div className="pipeline-step-icon">
-                                            {i < currentStep ? <FiCheckCircle /> : step.icon}
-                                        </div>
-                                        <span className="pipeline-step-label">{step.label}</span>
-                                        {i === currentStep && !complete && (
-                                            <div className="pipeline-step-loader" />
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                            {complete && (
-                                <button
-                                    className="btn btn-primary"
-                                    style={{ marginTop: '16px' }}
-                                    onClick={handleStartLearning}
-                                >
-                                    Start Learning <FiChevronRight />
-                                </button>
-                            )}
-                        </div>
-                    </section>
-                )}
-
-                {/* Sample Playlists */}
-                <section className="samples-section animate-fade-in-up stagger-3">
-                    <h3 className="heading-sm">Or try a sample playlist</h3>
-                    <div className="samples-grid">
-                        {SAMPLE_PLAYLISTS.map((p, i) => (
-                            <button
-                                key={i}
-                                className="sample-card glass-card"
-                                onClick={() => useSample(p.url)}
-                                disabled={isIngesting}
-                            >
-                                <div className="sample-info">
-                                    <h4 className="sample-title">{p.title}</h4>
-                                    <div className="sample-meta">
-                                        <span>{p.videos} videos</span>
-                                        <span>•</span>
-                                        <span>{p.duration}</span>
-                                    </div>
-                                </div>
-                                <FiChevronRight className="sample-arrow" />
-                            </button>
-                        ))}
-                    </div>
-                </section>
-
-                {/* Features */}
-                <section className="features-section animate-fade-in-up stagger-4">
-                    <div className="features-grid">
-                        {[
-                            { icon: '🧠', title: 'Knowledge Graph', desc: 'Auto-extracts concepts & prerequisites from transcripts' },
-                            { icon: '🎯', title: 'Socratic Tutor', desc: 'AI intervenes when you\'re confused — not when you\'re not' },
-                            { icon: '📊', title: 'Mastery Tracking', desc: 'Skill-based progress, not just watch time' },
-                            { icon: '🔄', title: 'Break Recovery', desc: 'Cognitive priming when you return after a break' },
-                        ].map((f, i) => (
-                            <div key={i} className="feature-card glass-card">
-                                <span className="feature-icon">{f.icon}</span>
-                                <h4 className="feature-title">{f.title}</h4>
-                                <p className="feature-desc">{f.desc}</p>
-                            </div>
-                        ))}
-                    </div>
-                </section>
+            {/* ===== FLOATING PARTICLES ===== */}
+            <div className="pi-particles" aria-hidden="true">
+                {[...Array(6)].map((_, i) => (
+                    <div key={i} className="pi-particle" style={{ '--delay': `${i * 2}s`, '--x': `${15 + i * 14}%` }} />
+                ))}
             </div>
+
+            {/* ===== HERO ===== */}
+            <section className="pi-hero">
+                <div className="container">
+                    <div className="pi-hero-content">
+                        <span className="badge badge-primary animate-fade-in-up">
+                            <FiZap size={12} /> AI-Powered Learning
+                        </span>
+                        <h1 className="heading-xl pi-headline">
+                            <span className="pi-typed">{typedText}</span>
+                            <span className="pi-cursor" />
+                        </h1>
+
+
+
+
+                        {/* Input form */}
+                        <div className="pi-input-row animate-fade-in-up stagger-4">
+                            <div className="pi-input-wrapper">
+                                <FiUploadCloud className="pi-input-icon" size={18} />
+                                <input
+                                    type="url"
+                                    className="input input-large pi-url-input"
+                                    placeholder="Paste YouTube playlist URL..."
+                                    value={playlistUrl}
+                                    onChange={e => setPlaylistUrl(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && handleIngest()}
+                                    disabled={status === 'loading'}
+                                />
+                            </div>
+                            <button
+                                className="btn btn-primary btn-lg pi-go-btn"
+                                onClick={handleIngest}
+                                disabled={!playlistUrl.trim() || status === 'loading'}
+                            >
+                                {status === 'loading' ? (
+                                    <><span className="pi-spinner" /> Processing...</>
+                                ) : status === 'success' ? (
+                                    <><FiCheck /> Done!</>
+                                ) : (
+                                    <><FiZap /> Start Learning</>
+                                )}
+                            </button>
+                        </div>
+
+                        {error && <p className="pi-error animate-shake">{error}</p>}
+                    </div>
+                </div>
+            </section>
+
+            {/* ===== PIPELINE ===== */}
+            {status !== 'idle' && (
+                <section className="pi-pipeline container animate-fade-in-up">
+                    <div className="pi-pipeline-track">
+                        {PIPELINE_STEPS.map((step, i) => (
+                            <div key={i} className={`pi-pipe-step ${i <= pipelineStep ? 'active' : ''} ${i === pipelineStep ? 'current' : ''}`}>
+                                <div className="pi-pipe-icon">{i < pipelineStep ? <FiCheck /> : step.icon}</div>
+                                <span className="pi-pipe-label">{step.label}</span>
+                                {i < PIPELINE_STEPS.length - 1 && (
+                                    <div className={`pi-pipe-line ${i < pipelineStep ? 'filled' : ''}`}>
+                                        {i === pipelineStep && <div className="pi-pipe-particle" />}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                    {status === 'success' && (
+                        <motion.div
+                            className="pi-success-msg"
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                        >
+                            <span>🎉</span>
+                            <p>Your learning path is ready!</p>
+                            <button className="btn btn-primary" onClick={() => navigate('/learn')}>
+                                Start Learning
+                            </button>
+                        </motion.div>
+                    )}
+                </section>
+            )}
+
+            {/* ===== SAMPLE PLAYLISTS ===== */}
+            <section className="pi-samples container">
+                <h2 className="heading-md pi-section-title">Recommendation</h2>
+                <div className="pi-sample-grid">
+                    {SAMPLE_PLAYLISTS.map((p, i) => (
+                        <button
+                            key={i}
+                            className="pi-sample-card glass-card"
+                            onClick={() => useSample(p.url)}
+                        >
+                            <div className="pi-sample-header">
+                                <span className="pi-sample-title">{p.title}</span>
+                                <span className={`badge ${p.difficulty === 'Beginner' ? 'badge-success' : p.difficulty === 'Intermediate' ? 'badge-primary' : 'badge-warning'}`}>
+                                    {p.difficulty}
+                                </span>
+                            </div>
+                            <span className="pi-sample-meta">{p.videos} videos</span>
+                        </button>
+                    ))}
+                </div>
+            </section>
+
+            {/* ===== HOW IT WORKS ===== */}
+            <section className="pi-how container">
+                <h2 className="heading-lg pi-section-title">How It Works</h2>
+                <div className="pi-how-grid">
+                    {HOW_IT_WORKS.map((item, i) => (
+                        <div key={i} className="pi-how-card glass-card-static animate-fade-in-up" style={{ animationDelay: `${i * 0.1}s` }}>
+                            <div className="pi-how-icon">{item.icon}</div>
+                            <h3 className="heading-md">{item.title}</h3>
+                            <p className="pi-how-desc">{item.desc}</p>
+                            <span className="pi-how-step">Step {i + 1}</span>
+                        </div>
+                    ))}
+                </div>
+            </section>
+
+            {/* ===== FAQ ===== */}
+            <section className="pi-faq container">
+                <h2 className="heading-lg pi-section-title">Frequently Asked Questions</h2>
+                <div className="accordion">
+                    {FAQ.map((item, i) => (
+                        <div key={i} className="accordion-item">
+                            <button
+                                className="accordion-trigger"
+                                onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                                aria-expanded={openFaq === i}
+                            >
+                                {item.q}
+                                {openFaq === i ? <FiChevronUp /> : <FiChevronDown />}
+                            </button>
+                            {openFaq === i && (
+                                <div className="accordion-content animate-fade-in">
+                                    {item.a}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            </section>
+
+            <div style={{ height: 80 }} />
         </div>
     );
 }
