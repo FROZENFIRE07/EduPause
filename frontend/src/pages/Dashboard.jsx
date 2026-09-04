@@ -1,8 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { FiPlay, FiBookOpen, FiAward, FiClock, FiTarget, FiZap, FiEdit3 } from 'react-icons/fi';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { FiPlay, FiBookOpen, FiAward, FiClock, FiTarget, FiZap, FiEdit3, FiBarChart2 } from 'react-icons/fi';
 import SkillGraph from '../components/SkillGraph';
 import ProgressRing from '../components/ProgressRing';
+import NextStepWidget from '../components/NextStepWidget';
+import SkillsDashboard from '../components/SkillsDashboard';
+import ProgressHeatmap from '../components/ProgressHeatmap';
 import { useAppStore } from '../store';
 import { useAchievementToast } from '../components/AchievementToast';
 import './Dashboard.css';
@@ -43,8 +46,11 @@ function AnimatedCounter({ value, suffix = '' }) {
 }
 
 export default function Dashboard() {
-    const { userName, achievements, dailyGoal, notes } = useAppStore();
-    const { triggerToast, ConfettiComponent } = useAchievementToast();
+    const navigate = useNavigate();
+    const { userName, achievements, dailyGoal, notes, authUser } = useAppStore();
+    const { ConfettiComponent } = useAchievementToast();
+    const userId = authUser?.email || authUser?.name || 'anonymous';
+    const playlistId = 'default';
 
     const unlockedCount = achievements.filter(a => a.unlocked).length;
     const notesCount = Object.keys(notes || {}).length;
@@ -124,6 +130,39 @@ export default function Dashboard() {
                     Knowledge Map
                 </h2>
                 <SkillGraph />
+            </section>
+
+            {/* ===== NEXT STEP ===== */}
+            <section className="dash-section container">
+                <h2 className="heading-lg dash-section-title">
+                    <FiPlay size={20} />
+                    Next Step
+                </h2>
+                <NextStepWidget
+                    userId={userId}
+                    playlistId={playlistId}
+                    onStartLearning={() => {
+                        navigate('/learn');
+                    }}
+                />
+            </section>
+
+            {/* ===== SKILLS ===== */}
+            <section className="dash-section container">
+                <h2 className="heading-lg dash-section-title">
+                    <FiBookOpen size={20} />
+                    Skills Tracker
+                </h2>
+                <SkillsDashboard userId={userId} playlistId={playlistId} />
+            </section>
+
+            {/* ===== PROGRESS HEATMAP ===== */}
+            <section className="dash-section container">
+                <h2 className="heading-lg dash-section-title">
+                    <FiBarChart2 size={20} />
+                    Concept Confidence
+                </h2>
+                <ProgressHeatmap userId={userId} playlistId={playlistId} />
             </section>
 
             {/* ===== ACHIEVEMENTS ===== */}

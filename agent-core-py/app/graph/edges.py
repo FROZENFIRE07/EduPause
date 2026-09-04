@@ -80,6 +80,7 @@ def route_action(state: dict) -> str:
         "evaluate": "evaluator",
         "plan": "planner",
         "break_recovery": "break_recovery",
+        "quiz_generator": "quiz_generator",
     }
 
     target = action_map.get(action, "observer")

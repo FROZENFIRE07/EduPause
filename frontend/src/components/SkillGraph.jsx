@@ -113,30 +113,45 @@ export default function SkillGraph({ playlistId, videoId, masteryScores = {} }) 
             })
         );
 
+        // Filter edges to only direct prerequisites (remove transitive edges)
+        // If A→B→C exists, don't also show A→C
+        const directEdges = edges.filter(edge => {
+            // Check if there's an indirect path from edge.from to edge.to through another node
+            const hasIndirectPath = edges.some(e1 =>
+                e1.from === edge.from && e1.to !== edge.to &&
+                edges.some(e2 => e2.from === e1.to && e2.to === edge.to)
+            );
+            return !hasIndirectPath;
+        });
+
         const edgeData = new DataSet(
-            edges.map((e, i) => ({
+            directEdges.map((e, i) => ({
                 id: `e-${i}`,
                 from: e.from,
                 to: e.to,
-                arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+                arrows: { to: { enabled: true, scaleFactor: 0.5 } },
                 color: { color: '#334155', highlight: '#6366f1', hover: '#6366f1' },
-                width: 1.5,
-                smooth: { type: 'curvedCW', forceDirection: 'none', roundness: 0.15 },
+                width: 1.2,
+                smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 },
             }))
         );
 
         const options = {
-            physics: {
-                enabled: true,
-                solver: 'forceAtlas2Based',
-                forceAtlas2Based: {
-                    gravitationalConstant: -60,
-                    centralGravity: 0.008,
-                    springLength: 130,
-                    springConstant: 0.06,
-                    damping: 0.4,
+            layout: {
+                hierarchical: {
+                    enabled: true,
+                    direction: 'UD',       // Up-Down (top-to-bottom tree)
+                    sortMethod: 'directed',
+                    levelSeparation: 120,
+                    nodeSpacing: 180,
+                    treeSpacing: 200,
+                    blockShifting: true,
+                    edgeMinimization: true,
+                    parentCentralization: true,
                 },
-                stabilization: { iterations: 200, fit: true },
+            },
+            physics: {
+                enabled: false,  // Disable physics — clean static tree
             },
             interaction: {
                 hover: true,
@@ -145,7 +160,6 @@ export default function SkillGraph({ playlistId, videoId, masteryScores = {} }) 
                 dragView: true,
                 navigationButtons: false,
             },
-            layout: { improvedLayout: true },
             nodes: {
                 borderWidthSelected: 3,
                 shapeProperties: { borderRadius: 8 },

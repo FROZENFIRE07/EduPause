@@ -6,6 +6,7 @@ import Navbar from './components/Navbar';
 import PlaylistImport from './pages/PlaylistImport';
 import LearningSession from './pages/LearningSession';
 import Dashboard from './pages/Dashboard';
+import StudyHub from './pages/StudyHub';
 import Search from './pages/Search';
 import AuthPage from './pages/AuthPage';
 import NotFound from './pages/NotFound';
@@ -32,6 +33,7 @@ function AnimatedRoutes({ isLoggedIn }) {
           <Route path="/" element={isLoggedIn ? <PlaylistImport /> : <Navigate to="/auth" replace />} />
           <Route path="/learn" element={isLoggedIn ? <LearningSession /> : <Navigate to="/auth" replace />} />
           <Route path="/dashboard" element={isLoggedIn ? <Dashboard /> : <Navigate to="/auth" replace />} />
+          <Route path="/study" element={isLoggedIn ? <StudyHub /> : <Navigate to="/auth" replace />} />
           <Route path="/search" element={isLoggedIn ? <Search /> : <Navigate to="/auth" replace />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

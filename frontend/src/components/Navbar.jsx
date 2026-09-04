@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { FiBookOpen, FiLayout, FiBarChart2, FiSearch, FiMenu, FiX, FiSun, FiMoon, FiLogOut } from 'react-icons/fi';
+import { FiBookOpen, FiLayout, FiBarChart2, FiSearch, FiMenu, FiX, FiSun, FiMoon, FiLogOut, FiEdit3 } from 'react-icons/fi';
 import { useAppStore } from '../store';
 import './Navbar.css';
 
@@ -48,6 +48,7 @@ export default function Navbar() {
         { to: '/', label: 'Import', icon: <FiBookOpen /> },
         { to: '/learn', label: 'Learn', icon: <FiLayout /> },
         { to: '/dashboard', label: 'Dashboard', icon: <FiBarChart2 /> },
+        { to: '/study', label: 'Study Hub', icon: <FiEdit3 /> },
         { to: '/search', label: 'Search', icon: <FiSearch /> },
     ];
 

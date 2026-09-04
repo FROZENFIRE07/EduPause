@@ -873,20 +873,22 @@ body::before {
 
 .tab {
   flex: 1;
-  padding: 8px 16px;
+  padding: 6px 10px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .tab:hover {

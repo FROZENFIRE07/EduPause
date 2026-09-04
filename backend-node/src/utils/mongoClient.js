@@ -25,7 +25,14 @@ export async function getDB() {
         await db.collection('sessions').createIndex({ sessionId: 1 }, { unique: true });
         await db.collection('clickstream').createIndex({ sessionId: 1, receivedAt: -1 });
         await db.collection('playlists').createIndex({ playlistUrl: 1 });
-        log('📇', 'MONGODB', `Indexes created for sessions, clickstream, playlists`);
+        await db.collection('roadmaps').createIndex({ playlistId: 1 }, { unique: true });
+        await db.collection('user_progress').createIndex({ userId: 1, playlistId: 1 }, { unique: true });
+        await db.collection('user_progress').createIndex({ userId: 1, lastActivity: -1 });
+        await db.collection('quiz_sessions').createIndex({ userId: 1, playlistId: 1, videoId: 1 });
+        await db.collection('quiz_sessions').createIndex({ status: 1 });
+        await db.collection('quiz_results').createIndex({ userId: 1, playlistId: 1 });
+        await db.collection('quiz_results').createIndex({ videoId: 1, takenAt: -1 });
+        log('📇', 'MONGODB', `Indexes created for sessions, clickstream, playlists, roadmaps, user_progress, quiz collections`);
 
         return db;
     } catch (err) {

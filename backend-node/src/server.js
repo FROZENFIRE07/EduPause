@@ -8,6 +8,11 @@ import sessionRouter from './routes/session.js';
 import agentRouter from './routes/agent.js';
 import graphRouter from './routes/graph.js';
 import transcriptRouter from './routes/transcript.js';
+import roadmapRouter from './routes/roadmap.js';
+import progressRouter from './routes/progress.js';
+import nextStepRouter from './routes/nextStep.js';
+import quizRouter from './routes/quiz.js';
+import breakRecoveryRouter from './routes/breakRecovery.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -56,6 +61,11 @@ app.use('/api/session', sessionRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/graph', graphRouter);
 app.use('/api/transcript', transcriptRouter);
+app.use('/api/roadmap', roadmapRouter);
+app.use('/api/progress', progressRouter);
+app.use('/api/next-step', nextStepRouter);
+app.use('/api/quiz', quizRouter);
+app.use('/api/break-recovery', breakRecoveryRouter);
 
 // Error handler
 app.use((err, req, res, next) => {

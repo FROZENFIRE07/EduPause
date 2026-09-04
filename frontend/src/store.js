@@ -98,6 +98,48 @@ export const useAppStore = create(
       logout: () => {
         set({ authUser: null, authToken: null });
       },
+
+      // Roadmap state
+      roadmap: null, // Structured roadmap for current playlist
+      roadmapLoading: false,
+      roadmapError: null,
+      setRoadmap: (roadmap) => set({ roadmap, roadmapError: null }),
+      setRoadmapLoading: (loading) => set({ roadmapLoading: loading }),
+      setRoadmapError: (error) => set({ roadmapError: error }),
+      clearRoadmap: () => set({ roadmap: null, roadmapError: null }),
+
+      // User progress state
+      userProgress: null, // Progress data for current playlist
+      progressLoading: false,
+      setUserProgress: (progress) => set({ userProgress: progress }),
+      setProgressLoading: (loading) => set({ progressLoading: loading }),
+      updateConceptMastery: (conceptId, mastery) =>
+        set((s) => ({
+          userProgress: s.userProgress
+            ? {
+                ...s.userProgress,
+                conceptsCovered: {
+                  ...s.userProgress.conceptsCovered,
+                  [conceptId]: mastery,
+                },
+              }
+            : null,
+        })),
+
+      // Next step recommendation
+      nextStep: null,
+      setNextStep: (step) => set({ nextStep: step }),
+
+      // Quiz history
+      quizHistory: [],
+      addQuizResult: (result) =>
+        set((s) => ({ quizHistory: [result, ...s.quizHistory].slice(0, 50) })),
+
+      // Chat messages per session
+      chatMessages: [],
+      addChatMessage: (msg) =>
+        set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
+      clearChatMessages: () => set({ chatMessages: [] }),
     }),
     {
       name: 'edupause-storage',

@@ -14,6 +14,7 @@ from app.graph.nodes import (
     evaluator_node,
     planner_node,
     break_recovery_node,
+    quiz_generator_node,
 )
 from app.graph.edges import (
     route_action,
@@ -40,8 +41,9 @@ def create_graph():
     builder.add_node("evaluator", evaluator_node)
     builder.add_node("planner", planner_node)
     builder.add_node("break_recovery", break_recovery_node)
+    builder.add_node("quiz_generator", quiz_generator_node)
 
-    logger.info("  ✅ Nodes added: observer, tutor, evaluator, planner, break_recovery")
+    logger.info("  ✅ Nodes added: observer, tutor, evaluator, planner, break_recovery, quiz_generator")
 
     # Entry point: route based on action
     builder.set_conditional_entry_point(
@@ -52,6 +54,7 @@ def create_graph():
             "evaluator": "evaluator",
             "planner": "planner",
             "break_recovery": "break_recovery",
+            "quiz_generator": "quiz_generator",
         },
     )
     logger.info("  ✅ Entry router configured")
@@ -85,12 +88,16 @@ def create_graph():
     # Break recovery → END
     builder.add_edge("break_recovery", END)
 
+    # Quiz generator → END
+    builder.add_edge("quiz_generator", END)
+
     logger.info("  ✅ Edges configured:")
     logger.info("    ├─ observer → [should_intervene] → tutor | END")
     logger.info("    ├─ tutor → END")
     logger.info("    ├─ evaluator → [check_mastery] → planner | tutor")
     logger.info("    ├─ planner → END")
-    logger.info("    └─ break_recovery → END")
+    logger.info("    ├─ break_recovery → END")
+    logger.info("    └─ quiz_generator → END")
 
     # Compile the graph
     graph = builder.compile()
@@ -134,6 +141,7 @@ async def invoke_graph(graph, state: AgentState, thread_id: str) -> dict:
             "mastery_achieved": result.get("mastery_achieved", False),
             "next_content": result.get("next_content"),
             "recap_summary": result.get("recap_summary", ""),
+            "quiz": result.get("quiz"),
         }
 
         logger.info("")

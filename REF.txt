@@ -1,0 +1,1253 @@
+================================================================================
+  REF.txt — GATE MASTERY ENGINE (Project Y)
+  Implementation-Ready Reference Document
+  Generated from: MasteryOS (Project X) deep analysis
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. SYSTEM OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WHAT IS PROJECT Y?
+──────────────────
+GATE Mastery Engine is a lean, exam-focused study system for GATE (Graduate
+Aptitude Test in Engineering) preparation. It transforms YouTube lecture videos
+into structured, timestamp-indexed notes optimized for exam revision.
+
+It is NOT a generic adaptive learning platform. It is a deterministic,
+PYQ-driven content pipeline with a clean reading interface.
+
+
+HOW IT DIFFERS FROM PROJECT X (MasteryOS)
+──────────────────────────────────────────
+┌──────────────────────┬──────────────────────────┬────────────────────────────┐
+│ Dimension            │ Project X (MasteryOS)    │ Project Y (GATE Engine)    │
+├──────────────────────┼──────────────────────────┼────────────────────────────┤
+│ Goal                 │ Adaptive learning OS     │ GATE exam notes generator  │
+│ Complexity           │ Multi-agent, 3 services  │ Single backend + frontend  │
+│ AI Usage             │ Agents, graphs, scoring  │ Summarization + notes only │
+│ Database             │ Mongo + Neo4j + Qdrant   │ MongoDB only (MVP)         │
+│ Python service       │ Required (LangGraph)     │ NOT needed                 │
+│ Real-time features   │ Clickstream, confusion   │ None                       │
+│ Output               │ Interactive learning     │ Static exam-ready notes    │
+│ User model           │ Mastery scores, progress │ Simple watch/read tracker  │
+│ Build time           │ 3+ months                │ 2-3 weeks                  │
+└──────────────────────┴──────────────────────────┴────────────────────────────┘
+
+
+WHY SIMPLICITY IS PREFERRED
+────────────────────────────
+1. GATE aspirants need NOTES, not gamification.
+2. The core value is: "Watch video → Get structured notes → Revise efficiently"
+3. Every unnecessary feature is a distraction from shipping.
+4. One Node.js backend + one React frontend. Zero Python. Zero Neo4j. Zero agents.
+5. Ship in 2-3 weeks, not 3 months.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  2. X → Y COMPONENT MAPPING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌─────────────────────────────────────┬──────────┬────────────────────────────────────────────────────┐
+│ Component (Project X)               │ Action   │ Reason                                             │
+├─────────────────────────────────────┼──────────┼────────────────────────────────────────────────────┤
+│ youtube.js (playlist + transcript)  │ KEEP     │ Core pipeline. Exact same extraction logic needed. │
+│ ytdlpTranscript.js (yt-dlp VTT)    │ KEEP     │ Best transcript quality. Timestamps are critical.  │
+│ chunker.js (timestamp chunking)     │ KEEP     │ Timestamp-aware chunking is the foundation.        │
+│ groqClient.js (summarizeChunk)      │ MODIFY   │ Keep summarizer, rewrite prompts for GATE context. │
+│ groqClient.js (extractConcepts)     │ REMOVE   │ No knowledge graph in Project Y.                   │
+│ groqClient.js (generateSocratic)    │ REMOVE   │ No Socratic interventions.                         │
+│ groqClient.js (generateRoadmap)     │ REMOVE   │ No AI roadmaps. Playlist order IS the roadmap.     │
+│ mongoClient.js                      │ MODIFY   │ Keep but change DB name, simplify indexes.         │
+│ embeddings.js                       │ OPTIONAL │ Only if semantic search is added post-MVP.         │
+│ qdrantClient.js                     │ REMOVE   │ No vector DB in MVP. Notes are text, not vectors.  │
+│ neo4jClient.js                      │ REMOVE   │ No knowledge graph. Concepts are in notes.         │
+│ logger.js                           │ KEEP     │ Clean logging. Reuse as-is.                        │
+│ ingestion.js (route)                │ MODIFY   │ Simplify: remove Neo4j/Qdrant steps, add notes.   │
+│ transcript.js (route)               │ KEEP     │ Transcript retrieval works perfectly.               │
+│ clickstream.js (route)              │ REMOVE   │ No behavioral tracking.                            │
+│ session.js (route)                  │ REMOVE   │ No learning sessions with mastery scoring.         │
+│ agent.js (route)                    │ REMOVE   │ No agent service.                                  │
+│ graph.js (route)                    │ REMOVE   │ No knowledge graph.                                │
+│ roadmap.js (route)                  │ REMOVE   │ Playlist order = roadmap.                          │
+│ quiz.js (route)                     │ REMOVE   │ No quiz system in MVP.                             │
+│ progress.js (route)                 │ REMOVE   │ Simple watch tracker replaces complex progress.    │
+│ nextStep.js (route)                 │ REMOVE   │ No AI-driven next-step recommendations.            │
+│ breakRecovery.js (route)            │ REMOVE   │ No break recovery system.                          │
+│ quizService.js                      │ REMOVE   │ No quiz generation.                                │
+│ progressService.js                  │ REMOVE   │ No mastery tracking.                               │
+│ roadmapService.js                   │ REMOVE   │ No roadmap generation.                             │
+│ nextStepService.js                  │ REMOVE   │ No ML-based recommendations.                       │
+│ breakRecoveryService.js             │ REMOVE   │ No break recovery.                                 │
+│ agent-core-py/ (entire directory)   │ REMOVE   │ No Python, no LangGraph, no multi-agent.           │
+│ LearningSession.jsx (page)          │ MODIFY   │ Simplify to: video + notes panel. No interventions.│
+│ PlaylistImport.jsx (page)           │ MODIFY   │ Simplify UI. Keep core import logic.               │
+│ Dashboard.jsx (page)                │ MODIFY   │ Replace mastery dashboard with simple progress.    │
+│ StudyHub.jsx (page)                 │ REMOVE   │ Not needed. Notes are in the learning view.        │
+│ Search.jsx (page)                   │ REMOVE   │ MVP doesn't need semantic search.                  │
+│ AuthPage.jsx (page)                 │ OPTIONAL │ Only if user accounts needed. Skip for MVP.        │
+│ VideoPlayer.jsx (component)         │ MODIFY   │ Remove clickstream tracking. Keep player.          │
+│ TranscriptViewer.jsx (component)    │ KEEP     │ Timestamp-linked transcript is valuable.           │
+│ InterventionModal.jsx               │ REMOVE   │ No Socratic interventions.                         │
+│ SkillGraph.jsx                      │ REMOVE   │ No knowledge graph visualization.                  │
+│ SkillsDashboard.jsx                 │ REMOVE   │ No mastery tracking UI.                            │
+│ QuizModal.jsx                       │ REMOVE   │ No quizzes.                                        │
+│ BreakRecovery.jsx                   │ REMOVE   │ No break recovery.                                 │
+│ WelcomeBackModal.jsx                │ REMOVE   │ No break recovery.                                 │
+│ CourseRoadmap.jsx                    │ REMOVE   │ No AI roadmaps.                                    │
+│ NextStepWidget.jsx                  │ REMOVE   │ No AI recommendations.                             │
+│ ProgressHeatmap.jsx                 │ REMOVE   │ No detailed progress visualization.                │
+│ ProgressRing.jsx                    │ REMOVE   │ No mastery rings.                                  │
+│ ConceptCard.jsx                     │ REMOVE   │ No concept cards.                                  │
+│ AchievementToast.jsx                │ REMOVE   │ No gamification.                                   │
+│ FireConfetti.jsx                    │ REMOVE   │ No celebrations.                                   │
+│ Onboarding.jsx                      │ REMOVE   │ No onboarding flow. Direct to import page.         │
+│ Navbar.jsx                          │ MODIFY   │ Simplify navigation links.                         │
+│ KeyboardShortcuts.jsx               │ REMOVE   │ Not needed for MVP.                                │
+│ store.js (Zustand)                  │ MODIFY   │ Gut 80% of state. Keep playlist + theme + notes.   │
+│ api.js                              │ MODIFY   │ Remove agent/quiz/progress/break APIs.             │
+└─────────────────────────────────────┴──────────┴────────────────────────────────────────────────────┘
+
+SUMMARY COUNT:
+  KEEP:     5 components
+  MODIFY:   9 components
+  REMOVE:  31 components
+  OPTIONAL: 2 components
+
+This is a 70%+ reduction in codebase complexity.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  3. FINAL ARCHITECTURE (Project Y)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TEXT-BASED ARCHITECTURE DIAGRAM
+────────────────────────────────
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │                     FRONTEND (React + Vite)                 │
+  │                                                             │
+  │  ┌──────────────┐  ┌────────────────┐  ┌───────────────┐   │
+  │  │ Import Page   │  │ Study View     │  │ Library Page  │   │
+  │  │ (URL input)   │  │ (video+notes)  │  │ (all plists)  │   │
+  │  └──────┬───────┘  └───────┬────────┘  └───────┬───────┘   │
+  │         │                  │                    │           │
+  │         └──────────┬───────┴────────────────────┘           │
+  │                    │                                        │
+  │              ┌─────▼─────┐        ┌─────────────┐          │
+  │              │  api.js   │        │  store.js   │          │
+  │              │ (Axios)   │        │ (Zustand)   │          │
+  │              └─────┬─────┘        └─────────────┘          │
+  └────────────────────┼───────────────────────────────────────┘
+                       │  HTTP
+  ┌────────────────────▼───────────────────────────────────────┐
+  │                  BACKEND (Node.js + Express)               │
+  │                                                            │
+  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
+  │  │ /ingest  │ │ /notes   │ │/summary  │ │ /transcript  │  │
+  │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──────┬───────┘  │
+  │       │            │            │               │          │
+  │       ▼            ▼            ▼               ▼          │
+  │  ┌─────────────────────────────────────────────────────┐   │
+  │  │              PIPELINE ENGINE                        │   │
+  │  │                                                     │   │
+  │  │  youtube.js → ytdlpTranscript.js → chunker.js      │   │
+  │  │       │              │                  │           │   │
+  │  │       ▼              ▼                  ▼           │   │
+  │  │  Playlist       Timestamped         Chunked         │   │
+  │  │  Metadata       Segments            Content         │   │
+  │  │                                        │            │   │
+  │  │                                        ▼            │   │
+  │  │                              groqClient.js          │   │
+  │  │                          (GATE-tuned prompts)       │   │
+  │  │                           │              │          │   │
+  │  │                           ▼              ▼          │   │
+  │  │                      Summaries      GATE Notes      │   │
+  │  └─────────────┬───────────────────────────────────────┘   │
+  │                │                                           │
+  │                ▼                                           │
+  │          ┌──────────┐                                      │
+  │          │ MongoDB  │                                      │
+  │          │  Atlas   │                                      │
+  │          └──────────┘                                      │
+  │   Collections:                                             │
+  │   - playlists     (metadata)                               │
+  │   - transcripts   (raw + segments)                         │
+  │   - summaries     (per-chunk summaries)                    │
+  │   - notes         (GATE-formatted notes per video)         │
+  └────────────────────────────────────────────────────────────┘
+
+  EXTERNAL SERVICES:
+  ┌────────────┐   ┌────────────┐   ┌────────────┐
+  │  YouTube   │   │  Groq API  │   │  MongoDB   │
+  │  (content) │   │ (LLM/Llama)│   │   Atlas    │
+  └────────────┘   └────────────┘   └────────────┘
+
+
+KEY ARCHITECTURAL DECISIONS
+────────────────────────────
+1. SINGLE BACKEND — No Python service. All AI calls are via Groq REST from Node.js.
+2. MONGODB ONLY — No Neo4j, no Qdrant. Notes are stored as structured JSON documents.
+3. NO AGENTS — Direct function calls. summarize() and generateNotes() are plain functions.
+4. PIPELINE, NOT GRAPH — Linear: ingest → transcript → chunk → summarize → notes.
+5. NOTES ARE THE PRODUCT — Everything exists to produce high-quality GATE notes.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  4. CORE MODULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+──── 4.1 VIDEO + TRANSCRIPT MODULE ────────────────────────────────────────────
+
+SOURCE FILES TO REUSE:
+  - backend-node/src/utils/youtube.js       → COPY AS-IS
+  - backend-node/src/utils/ytdlpTranscript.js → COPY AS-IS
+  - backend-node/src/utils/chunker.js       → COPY AS-IS
+
+These three files form the ingestion core. They are battle-tested in Project X
+and require ZERO modifications for Project Y.
+
+CAPABILITIES:
+  1. Playlist URL → video list (API with key rotation + scraping fallback)
+  2. Single video URL support
+  3. Transcript extraction: yt-dlp → Puppeteer → HTTP scrape → AI fallback
+  4. VTT parsing with timestamp preservation
+  5. Timestamp-aware chunking (~512 words per chunk, preserving time ranges)
+  6. Plain-text chunking fallback (when no timestamps available)
+
+DEPENDENCIES (already in package.json):
+  - axios (HTTP)
+  - puppeteer + puppeteer-extra + puppeteer-extra-plugin-stealth
+  - youtube-transcript (npm, minor fallback)
+  - yt-dlp (system CLI — must be installed on PATH)
+
+VIDEO PLAYBACK (Frontend):
+  Reuse react-player (already in frontend deps).
+  Strip clickstream tracking from VideoPlayer.jsx.
+  Keep: play, pause, seek, timestamp display.
+  Remove: confusion scoring, event streaming, intervention triggers.
+
+
+──── 4.2 SUMMARIZATION ENGINE ─────────────────────────────────────────────────
+
+SOURCE FILE: backend-node/src/utils/groqClient.js → MODIFY
+
+Keep the summarizeChunk() function structure. Rewrite the prompt for GATE context.
+
+NEW PROMPT (GATE-TUNED):
+
+```
+SYSTEM PROMPT:
+You are an expert GATE exam prep summarizer. Create a structured, exam-focused
+summary of the following lecture chunk.
+
+Rules:
+- Preserve ALL formulas, derivations, theorems, and definitions EXACTLY
+- Note which GATE subjects/topics this covers (e.g., "Digital Logic", "OS")
+- Highlight any statement that could become a GATE question
+- Use bullet points for factual content
+- Flag common exam traps or misconceptions
+- Reference video timestamps when provided
+- Target length: 25-40% of original
+- Bold all key terms and formula names
+
+Output as plain text with markdown formatting.
+```
+
+OUTPUT SCHEMA (Strict JSON):
+
+```json
+{
+  "videoId": "string",
+  "chunkIndex": 0,
+  "startTime": "HH:MM:SS",
+  "endTime": "HH:MM:SS",
+  "startSec": 0.0,
+  "endSec": 0.0,
+  "subject": "string (e.g., 'Digital Logic', 'Computer Networks')",
+  "topics": ["string"],
+  "summary": "string (markdown formatted)",
+  "keyFormulas": ["string"],
+  "definitions": ["string"],
+  "examRelevance": "high | medium | low",
+  "pyqHint": "string or null (if content relates to known PYQ patterns)"
+}
+```
+
+IMPLEMENTATION:
+
+```javascript
+// In groqClient.js — NEW function replacing old summarizeChunk
+
+export async function summarizeChunkGATE(chunkText, videoTitle = '', timeRange = null) {
+    const timeLabel = timeRange
+        ? `\nThis chunk covers video timestamps ${timeRange.startTime} to ${timeRange.endTime}.`
+        : '';
+
+    const response = await client.chat.completions.create({
+        model: MODEL,
+        messages: [
+            {
+                role: 'system',
+                content: `You are an expert GATE exam prep summarizer. Given a lecture transcript chunk, produce a structured JSON summary.
+
+Output STRICT JSON:
+{
+  "subject": "GATE subject (e.g., Digital Logic, OS, DBMS, CN, TOC, Algorithms, etc.)",
+  "topics": ["specific topic 1", "specific topic 2"],
+  "summary": "Detailed markdown summary preserving formulas, steps, theorems",
+  "keyFormulas": ["formula 1 in LaTeX/plain text", ...],
+  "definitions": ["Term: definition", ...],
+  "examRelevance": "high | medium | low",
+  "pyqHint": "How this content typically appears in GATE (or null)"
+}
+
+Rules:
+- Preserve ALL formulas, derivations, and theorems EXACTLY
+- Note GATE exam traps and common mistakes
+- Reference timestamps when provided
+- Be precise and technical — this is for engineering students`
+            },
+            {
+                role: 'user',
+                content: `Video: "${videoTitle}"${timeLabel}\n\nTranscript:\n${chunkText}`
+            }
+        ],
+        temperature: 0.2,
+        max_tokens: 1000,
+        response_format: { type: 'json_object' },
+    });
+
+    const parsed = JSON.parse(response.choices[0]?.message?.content || '{}');
+    return parsed;
+}
+```
+
+
+──── 4.3 NOTES GENERATION ENGINE (CRITICAL) ───────────────────────────────────
+
+This is the NEW module. It does NOT exist in Project X.
+
+The Notes Engine takes ALL chunk summaries for a video and produces a single,
+cohesive, exam-ready notes document.
+
+PROMPT TEMPLATE:
+
+```
+SYSTEM PROMPT:
+You are a GATE topper-level notes generator. Given structured summaries of a
+lecture video, produce comprehensive, exam-ready study notes.
+
+Your notes MUST include these sections (in this order):
+
+1. **📋 Overview** — 2-3 line summary of the video's coverage
+2. **📖 Definitions** — Every technical term defined precisely
+3. **🎯 Key Points** — Numbered list of critical concepts (exam-likely)
+4. **📐 Formulas & Theorems** — Every formula/theorem with conditions
+5. **📝 Detailed Notes** — Timestamp-indexed detailed explanation
+6. **⚠️ Common Mistakes & GATE Traps** — What students get wrong
+7. **📊 PYQ Insights** — How these topics appear in GATE (question patterns)
+8. **⚡ Quick Revision** — 10-15 one-liner bullet points for last-day revision
+9. **🔗 Prerequisites** — What should be known before this topic
+10. **📌 Summary Table** — Key comparisons in table format (if applicable)
+
+Rules:
+- Be PRECISE — this is engineering, not storytelling
+- Include ALL formulas in plain text or LaTeX
+- Reference video timestamps [HH:MM:SS] for each major point
+- Notes should be SELF-SUFFICIENT for revision (no need to re-watch)
+- Use markdown formatting for readability
+- Total length: 800-1500 words depending on video complexity
+
+Output as a single markdown string.
+```
+
+OUTPUT SCHEMA:
+
+```json
+{
+  "videoId": "string",
+  "videoTitle": "string",
+  "subject": "string",
+  "topics": ["string"],
+  "notes": "string (full markdown notes)",
+  "quickRevision": ["string (one-liner bullet points)"],
+  "formulaCount": 0,
+  "definitionCount": 0,
+  "estimatedGATERelevance": "high | medium | low",
+  "generatedAt": "ISO timestamp",
+  "sourceChunkCount": 0
+}
+```
+
+IMPLEMENTATION:
+
+```javascript
+// In groqClient.js — NEW function
+
+export async function generateGATENotes(chunkSummaries, videoTitle) {
+    // Combine all chunk summaries into a single context
+    const combinedContext = chunkSummaries.map((s, i) => {
+        const time = s.startTime ? `[${s.startTime} - ${s.endTime}]` : `[Chunk ${i+1}]`;
+        return `${time}\n${s.summary}\nFormulas: ${(s.keyFormulas || []).join(', ')}\nDefinitions: ${(s.definitions || []).join(', ')}`;
+    }).join('\n\n---\n\n');
+
+    const response = await client.chat.completions.create({
+        model: MODEL,
+        messages: [
+            {
+                role: 'system',
+                content: `You are a GATE topper-level notes generator. Given structured summaries of a lecture video, produce comprehensive, exam-ready study notes in markdown.
+
+REQUIRED SECTIONS (use these exact headers):
+## 📋 Overview
+## 📖 Definitions
+## 🎯 Key Points
+## 📐 Formulas & Theorems
+## 📝 Detailed Notes
+## ⚠️ Common Mistakes & GATE Traps
+## 📊 PYQ Insights
+## ⚡ Quick Revision
+## 🔗 Prerequisites
+
+Rules:
+- Be PRECISE. This is for engineering students preparing for GATE.
+- Include ALL formulas (LaTeX or plain text).
+- Reference [HH:MM:SS] timestamps for every major point.
+- Notes must be SELF-SUFFICIENT (no need to re-watch the video).
+- Quick Revision = 10-15 crisp one-liners for last-day revision.
+- PYQ Insights = How each topic typically appears in GATE questions.
+- 800-1500 words total.`
+            },
+            {
+                role: 'user',
+                content: `Generate GATE-ready notes for: "${videoTitle}"\n\nChunk Summaries:\n\n${combinedContext}`
+            }
+        ],
+        temperature: 0.25,
+        max_tokens: 3000,
+    });
+
+    return response.choices[0]?.message?.content || '';
+}
+```
+
+
+──── 4.4 KNOWLEDGE BASE LAYER ─────────────────────────────────────────────────
+
+SINGLE SOURCE OF TRUTH: MongoDB
+
+There is NO knowledge graph (Neo4j) and NO vector DB (Qdrant) in Project Y.
+All data lives in MongoDB as structured JSON documents.
+
+DATA RELATIONSHIPS:
+
+  Playlist (1) ──▶ (N) Videos
+  Video    (1) ──▶ (1) Transcript
+  Video    (1) ──▶ (N) ChunkSummaries
+  Video    (1) ──▶ (1) Notes
+
+Everything is linked by `videoId` and `playlistId`.
+
+WHY THIS IS SUFFICIENT:
+1. GATE prep is structured — topics are linear, not graph-shaped.
+2. Notes are text documents, not vector embeddings.
+3. Search can be done with MongoDB text indexes (good enough for MVP).
+4. If vector search is needed later, add Qdrant post-MVP.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  5. DATA FLOW (Step-by-Step)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PIPELINE: Playlist URL → Final Notes
+
+  STEP 1: USER INPUT
+  ──────────────────
+  Input:  YouTube playlist URL or single video URL
+  Action: POST /api/ingest { playlistUrl: "https://youtube.com/playlist?list=..." }
+  Output: { jobId: "uuid" }
+
+          │
+          ▼
+
+  STEP 2: PLAYLIST METADATA EXTRACTION
+  ──────────────────────────────────────
+  Input:  Playlist URL
+  Action: youtube.js → fetchPlaylistVideos()
+          - Try YouTube Data API (with key rotation)
+          - Fallback: scrape YouTube page HTML
+  Output: Array of { videoId, title, description, position }
+  Store:  → MongoDB `playlists` collection
+  Status: Job marked "complete" — user can start watching immediately
+
+          │  (background continues)
+          ▼
+
+  STEP 3: TRANSCRIPT EXTRACTION (per video, sequential)
+  ──────────────────────────────────────────────────────
+  Input:  videoId
+  Action: youtube.js → fetchTranscript()
+          Priority: yt-dlp CLI → Puppeteer → HTTP scrape → AI generation
+  Output: { plainText: "full text", segments: [{start, end, startSec, endSec, text}] }
+  Store:  → MongoDB `transcripts` collection
+  Delay:  5-second delay between videos (rate limit respect)
+
+          │
+          ▼
+
+  STEP 4: TIMESTAMP-AWARE CHUNKING (per video)
+  ─────────────────────────────────────────────
+  Input:  segments[] (from Step 3)
+  Action: chunker.js → chunkWithTimestamps(segments, { chunkSize: 512 })
+          - Groups VTT cues into ~512 word chunks
+          - Preserves startTime/endTime per chunk
+          - Falls back to chunkTranscript() if no timestamps
+  Output: Array of { text, startTime, endTime, startSec, endSec }
+
+          │
+          ▼
+
+  STEP 5: GATE-ORIENTED SUMMARIZATION (per chunk)
+  ────────────────────────────────────────────────
+  Input:  chunk.text + videoTitle + timeRange
+  Action: groqClient.js → summarizeChunkGATE()
+          - Groq API (llama-3.3-70b-versatile)
+          - GATE-focused prompt (see Section 4.2)
+  Output: {
+            subject, topics[], summary, keyFormulas[],
+            definitions[], examRelevance, pyqHint
+          }
+  Store:  → MongoDB `summaries` collection (per chunk)
+
+          │
+          ▼
+
+  STEP 6: NOTES GENERATION (per video — after ALL chunks summarized)
+  ──────────────────────────────────────────────────────────────────
+  Input:  All chunk summaries for one video
+  Action: groqClient.js → generateGATENotes()
+          - Combines all chunk summaries
+          - Single LLM call to produce cohesive notes
+          - 10 mandatory sections (see Section 4.3)
+  Output: {
+            videoId, videoTitle, subject, topics[],
+            notes (markdown), quickRevision[],
+            formulaCount, definitionCount, estimatedGATERelevance
+          }
+  Store:  → MongoDB `notes` collection
+
+          │
+          ▼
+
+  STEP 7: USER READS NOTES
+  ─────────────────────────
+  Frontend: GET /api/notes/:videoId
+  Display:  Split-panel view — video on left, notes on right
+  Feature:  Click timestamp → video seeks to that point
+
+
+COMPLETE DATA FORMAT TRANSFORMATIONS:
+
+  URL string
+    → { videoId, title }[]                           (Step 2: playlist metadata)
+    → { plainText, segments[] }                      (Step 3: raw transcript)
+    → { text, startTime, endTime }[]                 (Step 4: chunks)
+    → { summary, keyFormulas[], definitions[] }[]    (Step 5: GATE summaries)
+    → { notes: "markdown", quickRevision[] }         (Step 6: final notes)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  6. API DESIGN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TOTAL: 7 endpoints. Minimal but complete.
+
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  INGESTION                                                             │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  POST /api/ingest                                                      │
+  │  Body: { "playlistUrl": "https://youtube.com/..." }                    │
+  │  Response: { "jobId": "uuid", "status": "started" }                    │
+  │  Behavior:                                                             │
+  │    - Returns immediately with jobId                                    │
+  │    - Runs full pipeline in background                                  │
+  │    - Phase 1 (fast): fetch video list → mark complete                  │
+  │    - Phase 2 (bg): transcripts → chunks → summaries → notes           │
+  │                                                                        │
+  │  GET /api/ingest/status/:jobId                                         │
+  │  Response: {                                                           │
+  │    "status": "started | complete | error",                             │
+  │    "bgStatus": "processing | complete",                                │
+  │    "bgStep": 2-6,                                                      │
+  │    "videos": [{ "videoId", "title" }],                                 │
+  │    "details": "Human-readable progress message"                        │
+  │  }                                                                     │
+  │                                                                        │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  NOTES                                                                 │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  GET /api/notes/:videoId                                               │
+  │  Response: {                                                           │
+  │    "videoId": "string",                                                │
+  │    "videoTitle": "string",                                             │
+  │    "subject": "string",                                                │
+  │    "topics": ["string"],                                               │
+  │    "notes": "markdown string",                                         │
+  │    "quickRevision": ["string"],                                        │
+  │    "generatedAt": "ISO date"                                           │
+  │  }                                                                     │
+  │  Status 404 if notes not yet generated (pipeline still running)        │
+  │                                                                        │
+  │  GET /api/notes/playlist/:playlistId                                   │
+  │  Response: [{ videoId, videoTitle, subject, hasNotes: true/false }]     │
+  │  Lists all videos in playlist with notes availability                  │
+  │                                                                        │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  SUMMARIES                                                             │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  GET /api/summary/:videoId                                             │
+  │  Response: {                                                           │
+  │    "videoId": "string",                                                │
+  │    "chunks": [{                                                        │
+  │      "chunkIndex": 0,                                                  │
+  │      "startTime": "HH:MM:SS",                                         │
+  │      "endTime": "HH:MM:SS",                                           │
+  │      "subject": "string",                                              │
+  │      "summary": "markdown string",                                     │
+  │      "keyFormulas": ["string"],                                        │
+  │      "examRelevance": "high | medium | low"                            │
+  │    }]                                                                   │
+  │  }                                                                     │
+  │                                                                        │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  TRANSCRIPT                                                            │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  GET /api/transcript/:videoId                                          │
+  │  Response: {                                                           │
+  │    "videoId": "string",                                                │
+  │    "title": "string",                                                  │
+  │    "segments": [{ start, end, startSec, endSec, text }],               │
+  │    "plainText": "string"                                               │
+  │  }                                                                     │
+  │  (Exact same as Project X — reuse transcript.js route as-is)           │
+  │                                                                        │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  HEALTH                                                                │
+  ├─────────────────────────────────────────────────────────────────────────┤
+  │                                                                        │
+  │  GET /api/health                                                       │
+  │  Response: { "status": "ok", "service": "GATE Mastery Engine" }        │
+  │                                                                        │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  7. DATABASE DESIGN (MongoDB)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+DATABASE NAME: gate_mastery
+
+COLLECTIONS (4 total):
+
+
+COLLECTION: playlists
+─────────────────────
+Purpose: Store imported playlist metadata
+Index:   { playlistUrl: 1 } (unique)
+
+Example Document:
+```json
+{
+  "_id": "ObjectId",
+  "playlistUrl": "https://youtube.com/playlist?list=PLxCzCOWd7aiGFBD2-2joCpWOLUrDLvVV_",
+  "title": "Gate Smashers - Digital Logic",
+  "videos": [
+    { "videoId": "M7Qm_GFUQ8s", "title": "Number Systems | Binary, Octal, Hex", "position": 0 },
+    { "videoId": "abc123def45", "title": "Boolean Algebra Basics", "position": 1 }
+  ],
+  "videoCount": 15,
+  "ingestedAt": "2026-04-15T10:30:00.000Z",
+  "processingStatus": "complete",
+  "notesGenerated": 12
+}
+```
+
+
+COLLECTION: transcripts
+────────────────────────
+Purpose: Raw transcript text + timestamped segments
+Index:   { videoId: 1 } (unique)
+
+Example Document:
+```json
+{
+  "_id": "ObjectId",
+  "videoId": "M7Qm_GFUQ8s",
+  "title": "Number Systems | Binary, Octal, Hex",
+  "plainText": "Today we are going to discuss number systems...",
+  "segments": [
+    {
+      "start": "00:00:05",
+      "end": "00:00:12",
+      "startSec": 5.0,
+      "endSec": 12.0,
+      "text": "Today we are going to discuss number systems"
+    },
+    {
+      "start": "00:00:12",
+      "end": "00:00:20",
+      "startSec": 12.0,
+      "endSec": 20.0,
+      "text": "which is very important from the GATE perspective"
+    }
+  ],
+  "segmentCount": 245,
+  "charCount": 18500,
+  "extractedAt": "2026-04-15T10:31:00.000Z"
+}
+```
+
+
+COLLECTION: summaries
+─────────────────────
+Purpose: Per-chunk GATE-oriented summaries
+Index:   { videoId: 1, chunkIndex: 1 } (compound unique)
+
+Example Document:
+```json
+{
+  "_id": "ObjectId",
+  "videoId": "M7Qm_GFUQ8s",
+  "videoTitle": "Number Systems | Binary, Octal, Hex",
+  "chunkIndex": 0,
+  "startTime": "00:00:05",
+  "endTime": "00:04:30",
+  "startSec": 5.0,
+  "endSec": 270.0,
+  "subject": "Digital Logic",
+  "topics": ["Number Systems", "Binary Representation", "Base Conversion"],
+  "summary": "**Number Systems** are fundamental to digital logic...",
+  "keyFormulas": [
+    "(N)_b = d_{n-1} × b^{n-1} + d_{n-2} × b^{n-2} + ... + d_0 × b^0",
+    "2's complement = 1's complement + 1"
+  ],
+  "definitions": [
+    "Binary: Base-2 number system using digits 0 and 1",
+    "Hexadecimal: Base-16 number system using 0-9 and A-F"
+  ],
+  "examRelevance": "high",
+  "pyqHint": "GATE frequently asks base conversion problems (2-3 marks)",
+  "generatedAt": "2026-04-15T10:35:00.000Z"
+}
+```
+
+
+COLLECTION: notes
+─────────────────
+Purpose: Final GATE-ready notes per video (the product!)
+Index:   { videoId: 1 } (unique)
+
+Example Document:
+```json
+{
+  "_id": "ObjectId",
+  "videoId": "M7Qm_GFUQ8s",
+  "videoTitle": "Number Systems | Binary, Octal, Hex",
+  "playlistId": "PLxCzCOWd7aiGFBD2-2joCpWOLUrDLvVV_",
+  "subject": "Digital Logic",
+  "topics": ["Number Systems", "Binary", "Octal", "Hexadecimal", "Base Conversion"],
+  "notes": "## 📋 Overview\nThis lecture covers the fundamentals of number systems...\n\n## 📖 Definitions\n- **Binary**: Base-2...\n\n## 🎯 Key Points\n1. ...\n\n## 📐 Formulas & Theorems\n...",
+  "quickRevision": [
+    "Binary = Base 2 (0,1), Octal = Base 8 (0-7), Hex = Base 16 (0-F)",
+    "To convert decimal to binary: repeated division by 2",
+    "2's complement = 1's complement + 1 (used for negative numbers)",
+    "GATE trap: MSB is sign bit in signed representation"
+  ],
+  "formulaCount": 5,
+  "definitionCount": 8,
+  "estimatedGATERelevance": "high",
+  "sourceChunkCount": 6,
+  "generatedAt": "2026-04-15T10:40:00.000Z"
+}
+```
+
+
+OPTIONAL (Post-MVP): vector_chunks
+────────────────────────────────────
+If semantic search is needed later, add a Qdrant collection:
+  - Collection: gate_mastery_chunks
+  - Vector: 384-dim (all-MiniLM-L6-v2)
+  - Payload: { videoId, chunkIndex, summary, subject, startTime }
+  - Reuse embeddings.js and qdrantClient.js from Project X
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  8. FOLDER STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+gate-mastery-engine/
+│
+├── frontend/                          # React + Vite
+│   ├── public/
+│   │   └── favicon.ico
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Navbar.jsx             # MODIFIED from X (simplified)
+│   │   │   ├── Navbar.css
+│   │   │   ├── VideoPlayer.jsx        # MODIFIED from X (no clickstream)
+│   │   │   ├── VideoPlayer.css
+│   │   │   ├── NotesPanel.jsx         # NEW — renders markdown notes
+│   │   │   ├── NotesPanel.css
+│   │   │   ├── TranscriptViewer.jsx   # KEPT from X
+│   │   │   ├── TranscriptViewer.css
+│   │   │   ├── PlaylistSidebar.jsx    # NEW — video list with progress
+│   │   │   ├── PlaylistSidebar.css
+│   │   │   └── QuickRevision.jsx      # NEW — flashcard-style revision
+│   │   │   └── QuickRevision.css
+│   │   ├── pages/
+│   │   │   ├── ImportPage.jsx         # MODIFIED from PlaylistImport.jsx
+│   │   │   ├── ImportPage.css
+│   │   │   ├── StudyPage.jsx          # MODIFIED from LearningSession.jsx
+│   │   │   ├── StudyPage.css
+│   │   │   └── LibraryPage.jsx        # NEW — shows all imported playlists
+│   │   │   └── LibraryPage.css
+│   │   ├── api.js                     # MODIFIED (only 7 endpoints)
+│   │   ├── store.js                   # MODIFIED (minimal state)
+│   │   ├── App.jsx                    # MODIFIED (3 routes only)
+│   │   ├── App.css
+│   │   ├── index.css                  # MODIFIED (GATE-themed design system)
+│   │   └── main.jsx
+│   ├── index.html
+│   ├── vite.config.js
+│   └── package.json
+│
+├── backend/                           # Node.js + Express
+│   ├── src/
+│   │   ├── routes/
+│   │   │   ├── ingestion.js           # MODIFIED (no Neo4j/Qdrant, add notes step)
+│   │   │   ├── notes.js               # NEW — GET /notes/:videoId
+│   │   │   ├── summary.js             # NEW — GET /summary/:videoId
+│   │   │   └── transcript.js          # KEPT from X
+│   │   ├── utils/
+│   │   │   ├── youtube.js             # KEPT from X (exact copy)
+│   │   │   ├── ytdlpTranscript.js     # KEPT from X (exact copy)
+│   │   │   ├── chunker.js             # KEPT from X (exact copy)
+│   │   │   ├── groqClient.js          # MODIFIED (GATE prompts + notes gen)
+│   │   │   ├── mongoClient.js         # MODIFIED (new DB name, new indexes)
+│   │   │   └── logger.js              # KEPT from X (exact copy)
+│   │   └── server.js                  # MODIFIED (only 4 route imports)
+│   ├── temp_subs/                     # yt-dlp temp files (auto-cleaned)
+│   ├── .env
+│   ├── .gitignore
+│   └── package.json
+│
+├── .env.example
+├── .gitignore
+└── README.md
+
+TOTAL FILES: ~30 (vs ~60+ in Project X)
+DEPENDENCIES TO REMOVE from package.json:
+  - @qdrant/js-client-rest
+  - @xenova/transformers
+  - neo4j-driver
+  - puppeteer / puppeteer-extra / puppeteer-extra-plugin-stealth (KEEP only if using browser fallback)
+  - youtube-transcript (optional, yt-dlp is primary)
+
+DEPENDENCIES TO KEEP:
+  - axios, cors, dotenv, express, groq-sdk, mongodb, uuid
+
+FRONTEND DEPENDENCIES TO REMOVE:
+  - vis-data, vis-network (knowledge graph viz)
+  - react-confetti (gamification)
+  - react-icons (evaluate if needed)
+
+FRONTEND DEPENDENCIES TO ADD:
+  - react-markdown + remark-gfm (render notes)
+  - (optional) rehype-katex + remark-math (render LaTeX formulas)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  9. UI/UX DESIGN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+PAGE 1: IMPORT PAGE (/)
+───────────────────────
+
+  ┌────────────────────────────────────────────────────┐
+  │  🎓 GATE Mastery Engine           [Library]        │
+  ├────────────────────────────────────────────────────┤
+  │                                                    │
+  │           🎯 Import a Lecture Playlist             │
+  │                                                    │
+  │  ┌──────────────────────────────────────────────┐  │
+  │  │  Paste YouTube playlist or video URL...      │  │
+  │  └──────────────────────────────────────────────┘  │
+  │                  [ Start Processing ]               │
+  │                                                    │
+  │  ┌──────────────────────────────────────────────┐  │
+  │  │  Recent Imports:                             │  │
+  │  │  📁 Gate Smashers - Digital Logic (15 vids)  │  │
+  │  │  📁 Abdul Bari - Algorithms (22 vids)        │  │
+  │  │  📁 Neso Academy - CN (18 vids)              │  │
+  │  └──────────────────────────────────────────────┘  │
+  │                                                    │
+  └────────────────────────────────────────────────────┘
+
+
+PAGE 2: STUDY PAGE (/study)
+───────────────────────────
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │  🎓 GATE Mastery Engine    [Import] [Library]    Digital Logic      │
+  ├──────┬───────────────────────────────────────────┬──────────────────┤
+  │      │                                           │                  │
+  │ LIST │         VIDEO PLAYER                      │     NOTES        │
+  │      │    ┌─────────────────────┐                │     PANEL        │
+  │ 1. ▶ │    │                     │                │                  │
+  │ 2.   │    │    YouTube Video    │                │  ## 📋 Overview  │
+  │ 3.   │    │                     │                │  This lecture... │
+  │ 4.   │    └─────────────────────┘                │                  │
+  │ 5.   │                                           │  ## 🎯 Key Pts  │
+  │ 6.   │    ┌─ TRANSCRIPT ─────────────────┐       │  1. Binary...   │
+  │ 7.   │    │ [00:02:15] Number systems... │       │  2. Octal...    │
+  │ 8.   │    │ [00:02:30] Binary is base 2  │       │                  │
+  │ 9.   │    │ [00:02:45] with digits 0,1.. │       │  ## 📐 Formulas │
+  │ 10.  │    └──────────────────────────────┘       │  (N)_b = ...    │
+  │      │                                           │                  │
+  │      │    [ Transcript ] [ Summaries ]           │  ## ⚡ Quick Rev │
+  │      │                                           │  • Binary = ... │
+  │      │                                           │  • 2's comp...  │
+  │      │                                           │                  │
+  └──────┴───────────────────────────────────────────┴──────────────────┘
+
+  LEFT PANEL (20%):  Playlist sidebar — video list with checkmarks
+  CENTER (45%):      Video player + transcript/summaries tabs below
+  RIGHT (35%):       Notes panel — full GATE notes with markdown rendering
+
+  TIMESTAMP NAVIGATION:
+  - Click any [HH:MM:SS] in notes → video seeks to that timestamp
+  - Click any segment in transcript → video seeks there
+  - Currently active segment is highlighted in transcript
+
+  TABS BELOW VIDEO:
+  - "Transcript" — full timestamped transcript (TranscriptViewer.jsx from X)
+  - "Summaries" — per-chunk GATE summaries with exam relevance badges
+
+
+PAGE 3: LIBRARY PAGE (/library)
+────────────────────────────────
+
+  ┌────────────────────────────────────────────────────┐
+  │  🎓 GATE Mastery Engine    [Import] [Library]      │
+  ├────────────────────────────────────────────────────┤
+  │                                                    │
+  │  📚 Your Library                                   │
+  │                                                    │
+  │  ┌──────────────────────────────────────────────┐  │
+  │  │ 📁 Digital Logic (Gate Smashers)             │  │
+  │  │    15 videos · 12 notes ready · 3 processing │  │
+  │  │    [Open] [Delete]                           │  │
+  │  ├──────────────────────────────────────────────┤  │
+  │  │ 📁 Algorithms (Abdul Bari)                   │  │
+  │  │    22 videos · 22 notes ready                │  │
+  │  │    [Open] [Delete]                           │  │
+  │  ├──────────────────────────────────────────────┤  │
+  │  │ 📁 Computer Networks (Neso Academy)          │  │
+  │  │    18 videos · 10 notes ready · 8 processing │  │
+  │  │    [Open] [Delete]                           │  │
+  │  └──────────────────────────────────────────────┘  │
+  │                                                    │
+  └────────────────────────────────────────────────────┘
+
+
+DESIGN PRINCIPLES:
+  1. DISTRACTION-FREE — No recommendations, no sidebar videos, no ads
+  2. DARK THEME — Easy on eyes for long study sessions (reuse MasteryOS theme vars)
+  3. SPLIT PANEL — Video and notes always visible simultaneously
+  4. TIMESTAMP LINKS — Every notes section links back to the video moment
+  5. MARKDOWN RENDERING — Notes render with proper formatting, tables, formulas
+  6. RESPONSIVE — Collapses to stacked layout on mobile (video on top, notes below)
+  7. KEYBOARD SHORTCUTS — Space (play/pause), Arrow keys (seek), T (toggle transcript)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  10. MVP PLAN (2-3 Weeks)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+WEEK 1: INGESTION + TRANSCRIPT (Days 1-7)
+──────────────────────────────────────────
+
+  Day 1-2: Project Setup
+    [ ] Initialize new repo with folder structure (Section 8)
+    [ ] Copy these files from Project X UNCHANGED:
+        - youtube.js, ytdlpTranscript.js, chunker.js, logger.js
+    [ ] Set up backend package.json (trim deps — see Section 8)
+    [ ] Set up frontend with Vite (trim deps)
+    [ ] Configure .env with Groq + MongoDB + YouTube keys
+    [ ] Set up mongoClient.js (new DB name: gate_mastery)
+    [ ] Test: POST /api/ingest with a single video URL
+
+  Day 3-4: Ingestion Pipeline
+    [ ] Create modified ingestion.js route:
+        - Step 1-3: same as Project X (playlist → transcripts → chunks)
+        - Step 4: NEW — summarizeChunkGATE() instead of old summarizer
+        - Step 5: NEW — generateGATENotes() after all chunks done
+        - Remove: Neo4j writes, Qdrant upserts, concept extraction
+    [ ] Save summaries to MongoDB `summaries` collection
+    [ ] Save notes to MongoDB `notes` collection
+    [ ] Test: Full pipeline on a Gate Smashers video
+
+  Day 5-7: Transcript + Notes API
+    [ ] Copy transcript.js route from Project X (as-is)
+    [ ] Create notes.js route (GET /api/notes/:videoId)
+    [ ] Create summary.js route (GET /api/summary/:videoId)
+    [ ] Create server.js (4 routes only)
+    [ ] Test all endpoints with Postman/curl
+    [ ] Verify notes quality on 3 different GATE videos
+
+  WEEK 1 DELIVERABLE:
+  Working backend that converts YouTube → GATE notes via API
+
+
+WEEK 2: SUMMARIES + NOTES QUALITY (Days 8-14)
+──────────────────────────────────────────────
+
+  Day 8-9: Prompt Engineering
+    [ ] Test summarizeChunkGATE on 10+ diverse GATE videos
+    [ ] Tune prompt: formula extraction accuracy
+    [ ] Tune prompt: exam relevance classification
+    [ ] Tune prompt: PYQ hint quality
+    [ ] Test generateGATENotes on full video outputs
+    [ ] Iterate on notes format (Quick Revision quality is critical)
+
+  Day 10-11: Frontend Foundation
+    [ ] Set up minimal store.js (Zustand):
+        - currentPlaylist, savedPlaylists, theme
+    [ ] Set up minimal api.js (7 endpoints)
+    [ ] Set up App.jsx with 3 routes: /, /study, /library
+    [ ] Create Navbar.jsx (simplified from X)
+    [ ] Create ImportPage.jsx (simplified from PlaylistImport.jsx)
+    [ ] Create design system in index.css (dark GATE theme)
+
+  Day 12-14: Study Page (Core UI)
+    [ ] Create VideoPlayer.jsx (stripped from X — no clickstream)
+    [ ] Create NotesPanel.jsx (NEW — renders markdown)
+        - Install react-markdown + remark-gfm
+        - Timestamp click → video seek
+    [ ] Create PlaylistSidebar.jsx (video list)
+    [ ] Copy TranscriptViewer.jsx from X
+    [ ] Assemble StudyPage.jsx (3-panel layout)
+    [ ] Test: import playlist → watch video → see notes
+
+  WEEK 2 DELIVERABLE:
+  Working frontend + backend. User can import, watch, and read notes.
+
+
+WEEK 3: UI + INTEGRATION + POLISH (Days 15-21)
+───────────────────────────────────────────────
+
+  Day 15-16: Library + Polish
+    [ ] Create LibraryPage.jsx (shows all imported playlists)
+    [ ] Add processing status indicators (pipeline progress)
+    [ ] Add "notes generating..." skeleton states
+    [ ] Handle edge cases: no transcript, API errors, empty notes
+
+  Day 17-18: Notes Quality + UX
+    [ ] Add Quick Revision component (expandable section)
+    [ ] Add formula rendering (optional: rehype-katex)
+    [ ] Add print/export notes as PDF (optional)
+    [ ] Responsive design (mobile stack layout)
+    [ ] Keyboard shortcuts (play/pause, seek, toggle panels)
+
+  Day 19-20: Testing + Deployment
+    [ ] Test full flow with 3 real GATE playlists:
+        - Gate Smashers (Digital Logic)
+        - Abdul Bari (Algorithms)
+        - Neso Academy (Computer Networks)
+    [ ] Fix bugs + edge cases
+    [ ] Deploy: Frontend → Vercel, Backend → Render
+    [ ] Configure environment variables on production
+
+  Day 21: Documentation
+    [ ] Write README.md with setup instructions
+    [ ] Record demo video
+    [ ] Tag v1.0.0
+
+  WEEK 3 DELIVERABLE:
+  Deployed, tested MVP. User can import any GATE playlist and get exam notes.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  11. WHAT NOT TO BUILD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The following features exist in Project X and MUST NOT be included in MVP:
+
+  ╳  Multi-Agent Orchestration (LangGraph)
+     Why: Notes generation is a single LLM call, not a graph of agents.
+
+  ╳  Python Agent Service (agent-core-py/)
+     Why: All LLM calls happen via Groq REST from Node.js. No Python needed.
+
+  ╳  Knowledge Graph (Neo4j)
+     Why: GATE prep is linear (video → notes). No prerequisite mapping needed.
+
+  ╳  Vector Database (Qdrant)
+     Why: Notes are text, not embeddings. MongoDB text search is sufficient.
+
+  ╳  Clickstream Tracking + Confusion Detection
+     Why: Users are reading notes, not being monitored for confusion.
+
+  ╳  Socratic Intervention System
+     Why: No popup quizzes. Users read notes at their own pace.
+
+  ╳  Break Recovery Protocol
+     Why: Users open the app, see their notes. No cognitive priming needed.
+
+  ╳  Mastery Scoring + Progress Tracking
+     Why: Simple checkmarks (watched / not watched) replace complex mastery scores.
+
+  ╳  Achievement System + Gamification
+     Why: GATE aspirants need results, not badges. No confetti. No toasts.
+
+  ╳  AI Roadmap Generation
+     Why: The playlist order IS the roadmap. No need for AI-generated milestones.
+
+  ╳  Quiz System (30-question quizzes)
+     Why: Notes + PYQ insights replace quiz generation. Build PYQ bank post-MVP.
+
+  ╳  Next-Step Recommendations
+     Why: "Watch the next video" is the recommendation.
+
+  ╳  Onboarding Flow
+     Why: Import URL → Get notes. That's the onboarding.
+
+  ╳  Authentication
+     Why: MVP is single-user. Local storage is sufficient.
+
+  ╳  Semantic Search
+     Why: Ctrl+F on notes. Post-MVP feature if needed.
+
+  ╳  Spaced Repetition
+     Why: Quick Revision bullets serve this purpose for now.
+
+  ╳  Knowledge Graph Visualization (vis-network)
+     Why: No graph, no visualization.
+
+  ╳  AI Chat Tutor
+     Why: Notes are the tutor. Post-MVP feature.
+
+  ╳  Theater Mode
+     Why: Unnecessary complexity for a study app.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  APPENDIX A: ENVIRONMENT VARIABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BACKEND (.env):
+  PORT=5000
+  FRONTEND_URL=http://localhost:5173
+  GROQ_API_KEY=gsk_xxxxx                     # Required
+  GROQ_MODEL=llama-3.3-70b-versatile         # Default
+  MONGODB_URI=mongodb+srv://...              # Required
+  MONGODB_DB=gate_mastery                    # Default
+  YOUTUBE_API_KEY1=AIzaSyxxxxx               # Optional (scraping fallback exists)
+
+FRONTEND (.env):
+  VITE_API_URL=http://localhost:5000/api
+
+REMOVED from Project X:
+  NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD      # No knowledge graph
+  QDRANT_URL, QDRANT_API_KEY                  # No vector DB
+  AGENT_SERVICE_URL                           # No Python agent
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  APPENDIX B: MODIFIED INGESTION PIPELINE (pseudocode)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function runIngestionPipeline(jobId, playlistUrl) {
+    // PHASE 1: FAST PATH (same as Project X)
+    const videos = await fetchPlaylistVideos(playlistUrl);
+    job.status = 'complete';  // User can start watching immediately
+    saveToDB('playlists', { playlistUrl, videos });
+
+    // PHASE 2: BACKGROUND (modified from Project X)
+    job.bgStatus = 'processing';
+
+    // Step 2: Extract transcripts (SAME as Project X)
+    for (const video of videos) {
+        await delay(5000);
+        const { plainText, segments } = await fetchTranscript(video.videoId);
+        saveToDB('transcripts', { videoId, plainText, segments });
+    }
+
+    // Step 3: Chunk + Summarize (MODIFIED — GATE prompts)
+    for (const video of transcripts) {
+        const chunks = chunkWithTimestamps(video.segments, { chunkSize: 512 });
+        const summaries = [];
+
+        for (const chunk of chunks) {
+            const summary = await summarizeChunkGATE(chunk.text, video.title, {
+                startTime: chunk.startTime,
+                endTime: chunk.endTime
+            });
+            summaries.push({ ...summary, chunkIndex, startTime, endTime });
+            saveToDB('summaries', summary);
+        }
+
+        // Step 4: Generate Notes (NEW — does not exist in Project X)
+        const notes = await generateGATENotes(summaries, video.title);
+        saveToDB('notes', { videoId, videoTitle, notes, subject, topics... });
+    }
+
+    // REMOVED: Step 4 (extractConcepts → Neo4j)
+    // REMOVED: Step 5 (embedBatch → Qdrant)
+
+    job.bgStatus = 'complete';
+}
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  APPENDIX C: POST-MVP FEATURES (prioritized)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  PRIORITY 1 (Month 2):
+    - PYQ Bank: curated GATE PYQs linked to notes by topic
+    - Search: MongoDB text index search across all notes
+    - Export: Download notes as PDF or markdown
+
+  PRIORITY 2 (Month 3):
+    - Semantic Search: Add Qdrant + embeddings (reuse from Project X)
+    - Subject Dashboard: Progress per GATE subject
+    - Formula Sheet: Auto-generated formula compilation per subject
+
+  PRIORITY 3 (Month 4+):
+    - Quiz Mode: Generate practice questions from notes
+    - Spaced Repetition: Schedule review of Quick Revision bullets
+    - Multi-user: Add authentication + cloud sync
+    - Mobile App: React Native or PWA
+
+================================================================================
+  END OF REF.txt
+  "How to go from Project X → Project Y in the most efficient and practical way."
+================================================================================

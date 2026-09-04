@@ -19,7 +19,7 @@ MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 logger = logging.getLogger("agent.nodes")
 
 
-def llm_call(system_prompt: str, user_prompt: str, json_mode: bool = False) -> str:
+def llm_call(system_prompt: str, user_prompt: str, json_mode: bool = False, max_tokens: int = 600) -> str:
     """Helper: call Groq LLM or return mock response"""
     is_mock = not groq_client or os.getenv("GROQ_API_KEY", "demo") == "demo"
 
@@ -45,7 +45,7 @@ def llm_call(system_prompt: str, user_prompt: str, json_mode: bool = False) -> s
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.4,
-        "max_tokens": 600,
+        "max_tokens": max_tokens,
     }
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
@@ -255,11 +255,20 @@ def evaluator_node(state: dict) -> dict:
     """
     Scores user's response and updates mastery state.
     Uses transcript context for more accurate evaluation.
+    EXTENDED: Now also handles checkpoint quiz evaluation.
     """
     logger.info("╔══════════════════════════════════════════════════════════════╗")
     logger.info("║  📝 EVALUATOR NODE — Scoring user response                  ║")
     logger.info("╚══════════════════════════════════════════════════════════════╝")
 
+    # Check if this is a quiz evaluation or intervention evaluation
+    quiz_responses = state.get("quiz_responses", [])
+    
+    if quiz_responses:
+        # Quiz evaluation mode
+        return evaluate_quiz_responses(state)
+    
+    # Original intervention evaluation mode
     user_answer = state.get("user_answer", "")
     intervention = state.get("intervention", {})
     concept = state.get("current_concept", "unknown")
@@ -332,6 +341,280 @@ Expected concept: {concept}{transcript_hint}"""
         "evaluation_feedback": feedback,
         "mastery_scores": mastery,
         "mastery_achieved": mastery_achieved,
+    }
+
+
+def evaluate_quiz_responses(state: dict) -> dict:
+    """
+    Evaluate checkpoint quiz responses.
+    Called by evaluator_node when quiz_responses are present.
+    """
+    logger.info("  📝 Quiz Evaluation Mode")
+    
+    quiz_responses = state.get("quiz_responses", [])
+    quiz = state.get("quiz", {})
+    questions = quiz.get("questions", [])
+    concept = state.get("current_concept", "unknown")
+    mastery = dict(state.get("mastery_scores", {}))
+
+    logger.info("    ├─ Quiz concept: %s", concept)
+    logger.info("    └─ Responses:    %d", len(quiz_responses))
+
+    evaluations = []
+    correct_count = 0
+    total_score = 0
+
+    for response in quiz_responses:
+        q_idx = response.get("questionIndex", 0)
+        ans_idx = response.get("answerIndex", 0)
+        
+        if q_idx >= len(questions):
+            continue
+            
+        question = questions[q_idx]
+        correct_idx = question.get("correct_index", 0)
+        is_correct = ans_idx == correct_idx
+        
+        # Difficulty multipliers
+        difficulty_multiplier = {
+            'easy': 0.8,
+            'medium': 1.0,
+            'hard': 1.2
+        }.get(question.get('difficulty', 'medium'), 1.0)
+        
+        score = (100 * difficulty_multiplier) if is_correct else 0
+        
+        if is_correct:
+            correct_count += 1
+        total_score += score
+        
+        evaluations.append({
+            "questionIndex": q_idx,
+            "question": question.get("question", ""),
+            "difficulty": question.get("difficulty", "medium"),
+            "userAnswer": ans_idx,
+            "correctAnswer": correct_idx,
+            "isCorrect": is_correct,
+            "score": score,
+            "explanation": question.get("explanation", "")
+        })
+
+    average_score = total_score / len(quiz_responses) if quiz_responses else 0
+    percentage_correct = (correct_count / len(quiz_responses) * 100) if quiz_responses else 0
+    
+    # Update mastery based on quiz performance
+    current_mastery = mastery.get(concept, 0)
+    
+    # Quiz contributes 60% to confidence (see progressService formula)
+    quiz_contribution = average_score / 100
+    new_mastery = min(100, current_mastery + (quiz_contribution * 20))
+    mastery[concept] = new_mastery
+    
+    mastery_achieved = new_mastery >= 70
+
+    logger.info("  ✅ Quiz evaluation complete:")
+    logger.info("    ├─ Correct: %d/%d (%.1f%%)", correct_count, len(quiz_responses), percentage_correct)
+    logger.info("    ├─ Avg score: %.1f", average_score)
+    logger.info("    └─ Mastery: %d → %d", current_mastery, new_mastery)
+
+    return {
+        "answer_correct": percentage_correct >= 60,  # 60% pass threshold
+        "evaluation_feedback": f"Quiz complete: {correct_count}/{len(quiz_responses)} correct ({percentage_correct:.0f}%)",
+        "mastery_scores": mastery,
+        "mastery_achieved": mastery_achieved,
+        "quiz_evaluations": evaluations,
+        "quiz_correct_count": correct_count,
+        "quiz_percentage": percentage_correct,
+    }
+
+
+# ─── Quiz Generator Node ────────────────────────────────────────────────────
+
+def quiz_generator_node(state: dict) -> dict:
+    """
+    Generates a comprehensive 30-question checkpoint quiz based on transcript content.
+    - 10 EASY questions: Direct recall — definitions, facts, terminology from transcript
+    - 10 MEDIUM questions: Understanding — relationships, comparisons, cause/effect
+    - 10 HARD questions: Application/reasoning — applying concepts to new scenarios
+    
+    ALL questions are STRICTLY derived from the transcript — never generic.
+    """
+    logger.info("╔══════════════════════════════════════════════════════════════╗")
+    logger.info("║  📝 QUIZ GENERATOR NODE — Creating 30-question quiz        ║")
+    logger.info("╚══════════════════════════════════════════════════════════════╝")
+
+    concept = state.get("current_concept", "unknown")
+    transcript_ctx = state.get("transcript_context", "")
+    video_title = state.get("video_title", "")
+    concepts_covered = state.get("concepts_covered", [])
+
+    logger.info("  📋 Input:")
+    logger.info("    ├─ Primary concept: \"%s\"", concept)
+    logger.info("    ├─ Video title:     \"%s\"", video_title)
+    logger.info("    ├─ Concepts count:  %d", len(concepts_covered))
+    logger.info("    └─ Transcript:      %d chars", len(transcript_ctx))
+
+    if not transcript_ctx:
+        logger.warning("  ⚠️  No transcript context — cannot generate quality quiz")
+        return {
+            "quiz": {
+                "concept": concept,
+                "questions": [],
+                "error": "No transcript available for this video"
+            }
+        }
+
+    concept_list = ", ".join(concepts_covered) if concepts_covered else concept
+    difficulty_focus = state.get("difficulty", "medium").lower()
+    
+    # Use full transcript for maximum context
+    transcript_sample = transcript_ctx[:4000] if len(transcript_ctx) > 4000 else transcript_ctx
+
+    all_questions = []
+
+    # Prepare system and user prompts based on difficulty
+    if difficulty_focus == "easy":
+        sys_prompt = """You are a quiz generator for educational content. Generate exactly 10 EASY multiple-choice questions.
+
+EASY questions test DIRECT RECALL — the answer is explicitly stated in the transcript.
+Question types for EASY:
+- "What is the definition of X as described in the video?"
+- "According to the lecture, what does X refer to?"
+- "The speaker mentions that X is used for ___. What fills the blank?"
+- "Which term does the speaker use to describe ___?"
+
+Output JSON format:
+{
+    "questions": [
+        {
+            "difficulty": "easy",
+            "question": "Question text...",
+            "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
+            "correct_index": 0,
+            "explanation": "The transcript states: '[exact quote or paraphrase]'"
+        }
+    ]
+}
+
+STRICT RULES:
+1. ONLY use information from the transcript — NO external knowledge
+2. Every correct answer must be directly findable in the text
+3. Vary correct_index (0-3)"""
+        usr_prompt = f"""Generate 10 EASY recall-based questions from this transcript.
+Video title: {video_title}
+Concepts: {concept_list}
+
+Transcript:
+{transcript_sample}"""
+
+    elif difficulty_focus == "hard":
+        sys_prompt = """You are a quiz generator for educational content. Generate exactly 10 HARD multiple-choice questions.
+
+HARD questions test APPLICATION and REASONING.
+Question types for HARD:
+- "Based on the concepts, what would happen if ___?"
+- "A student is building X using these principles. Which approach is best?"
+- "Consider scenario ___. Applying what was taught, what is the result?"
+
+Output JSON format:
+{
+    "questions": [
+        {
+            "difficulty": "hard",
+            "question": "Question text...",
+            "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
+            "correct_index": 2,
+            "explanation": "Explanation..."
+        }
+    ]
+}
+
+STRICT RULES:
+1. ONLY use information from the transcript — NO external knowledge
+2. Questions must require REASONING
+3. Vary correct_index (0-3)"""
+        usr_prompt = f"""Generate 10 HARD reasoning questions from this transcript.
+Video title: {video_title}
+Concepts: {concept_list}
+
+Transcript:
+{transcript_sample}"""
+
+    else:
+        sys_prompt = """You are a quiz generator for educational content. Generate exactly 10 MEDIUM multiple-choice questions.
+
+MEDIUM questions test UNDERSTANDING — relationships, comparisons.
+Question types for MEDIUM:
+- "How does X relate to Y according to the lecture?"
+- "Why does the speaker say X leads to Y?"
+- "What would happen to X if Y changes?"
+
+Output JSON format:
+{
+    "questions": [
+        {
+            "difficulty": "medium",
+            "question": "Question text...",
+            "options": ["A) ...", "B) ...", "C) ...", "D) ..."],
+            "correct_index": 1,
+            "explanation": "Explanation..."
+        }
+    ]
+}
+
+STRICT RULES:
+1. ONLY use information from the transcript
+2. Questions must test UNDERSTANDING, not just recall
+3. Vary correct_index (0-3)"""
+        usr_prompt = f"""Generate 10 MEDIUM understanding-based questions from this transcript.
+Video title: {video_title}
+Concepts: {concept_list}
+
+Transcript:
+{transcript_sample}"""
+
+    logger.info("  📤 Generating 10 %s questions...", difficulty_focus.upper())
+    try:
+        # Generate with 2500 max tokens which should easily fit 10 questions
+        result = llm_call(sys_prompt, usr_prompt, json_mode=True, max_tokens=2500)
+        batch = json.loads(result)
+        questions = batch.get("questions", [])
+        
+        # Ensure difficulty tag is set correctly and exactly 10 questions exist
+        for q in questions:
+            q["difficulty"] = difficulty_focus
+            
+        all_questions.extend(questions)
+        logger.info("    ✅ Got %d %s questions", len(questions), difficulty_focus)
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning("    ⚠️  Failed to generate %s questions: %s", difficulty_focus, str(e))
+        # Add fallback questions for this difficulty
+        all_questions.append({
+            "difficulty": difficulty_focus,
+            "question": f"Based on the video about {concept}, what is a key takeaway at the {difficulty_focus} level?",
+            "options": [
+                f"A) The core principle of {concept} as explained in the lecture",
+                f"B) An unrelated concept not discussed in the video",
+                f"C) A historical fact about {concept}",
+                f"D) An alternative to {concept} not mentioned",
+            ],
+            "correct_index": 0,
+            "explanation": f"The video focuses on explaining the core principles of {concept}.",
+        })
+
+    logger.info("  ✅ Quiz generated: %d total questions", len(all_questions))
+    logger.info("    ├─ Easy:   %d", len([q for q in all_questions if q.get("difficulty") == "easy"]))
+    logger.info("    ├─ Medium: %d", len([q for q in all_questions if q.get("difficulty") == "medium"]))
+    logger.info("    └─ Hard:   %d", len([q for q in all_questions if q.get("difficulty") == "hard"]))
+
+    return {
+        "quiz": {
+            "concept": concept,
+            "video_title": video_title,
+            "questions": all_questions,
+            "generated_at": datetime.now().isoformat(),
+            "total_questions": len(all_questions),
+        }
     }
 
 

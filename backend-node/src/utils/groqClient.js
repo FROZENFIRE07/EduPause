@@ -206,3 +206,80 @@ Output JSON:
         return { type: 'text', question: `Explain ${concept} in your own words.` };
     }
 }
+
+/**
+ * Generate a concise course roadmap from playlist video data
+ * @param {{ title: string, summary: string }[]} videoData - array of video title + summary pairs
+ * @returns {Promise<Array<{ id: string, title: string, description: string, icon: string }>>}
+ */
+export async function generateRoadmap(videoData) {
+    const videoList = videoData
+        .map((v, i) => `${i + 1}. "${v.title}"\n   Content: ${(v.summary || '').substring(0, 800)}`)
+        .join('\n\n');
+
+    if (!process.env.GROQ_API_KEY) {
+        log('🤖', 'GROQ', `generateRoadmap [MOCK] — ${videoData.length} videos`);
+        return videoData.slice(0, Math.min(8, videoData.length)).map((v, i) => ({
+            id: `milestone-${i}`,
+            title: v.title.replace(/^(But )?what (is|are) /i, '').replace(/\?$/i, '').trim().substring(0, 40),
+            description: `Understanding the fundamentals of this topic`,
+            icon: ['🎯', '📐', '🧮', '⚡', '🔬', '🧠', '🏗️', '🚀'][i % 8],
+        }));
+    }
+
+    log('🤖', 'GROQ', `generateRoadmap [${MODEL}] — ${videoData.length} videos`);
+    const start = Date.now();
+
+    const response = await client.chat.completions.create({
+        model: MODEL,
+        messages: [
+            {
+                role: 'system',
+                content: `You are a curriculum designer creating a learning roadmap from VIDEO TRANSCRIPT content. Your roadmap MUST be deeply specific to what is actually taught in the videos — NOT generic.
+
+Output strict JSON:
+{
+  "milestones": [
+    {
+      "id": "milestone-0",
+      "title": "Short concept name (3-5 words)",
+      "description": "Specific description referencing actual content taught. Mention real terms, formulas, examples, or techniques from the transcript.",
+      "icon": "single emoji",
+      "key_topics": ["specific term from transcript", "another real topic"]
+    }
+  ]
+}
+
+Rules:
+- Create EXACTLY 6 to 10 milestones
+- Group related videos into ONE milestone
+- Order: foundational → advanced (learning progression)
+- DESCRIPTIONS MUST be specific: reference actual definitions, formulas, algorithms, or examples mentioned in the transcripts
+  ✗ BAD: "Learn about neural networks" (too generic)
+  ✓ GOOD: "Understand how neurons multiply inputs by weights, sum them, and pass through activation functions like sigmoid and ReLU to produce outputs"
+- key_topics must be REAL terms/concepts from the transcript content
+- Each milestone = a verifiable skill the learner can demonstrate, not just "watched a video"
+- Use diverse, relevant emojis`
+            },
+            {
+                role: 'user',
+                content: `Create a course roadmap from these ${videoData.length} videos:\n\n${videoList}`
+            }
+        ],
+        temperature: 0.3,
+        max_tokens: 800,
+        response_format: { type: 'json_object' },
+    });
+
+    const elapsed = Date.now() - start;
+
+    try {
+        const parsed = JSON.parse(response.choices[0]?.message?.content || '{}');
+        const milestones = parsed.milestones || [];
+        log('✅', 'GROQ', `generateRoadmap done [${elapsed}ms] — ${milestones.length} milestones`);
+        return milestones;
+    } catch {
+        log('⚠️', 'GROQ', `generateRoadmap parse failed [${elapsed}ms]`);
+        return [];
+    }
+}

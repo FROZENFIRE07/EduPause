@@ -112,6 +112,7 @@ class InvokeRequest(BaseModel):
     transcriptContext: Optional[str] = None
     videoId: Optional[str] = None
     videoTimestamp: Optional[float] = None
+    difficulty: Optional[str] = None
 
 
 class InvokeResponse(BaseModel):
@@ -161,6 +162,7 @@ async def invoke(req: InvokeRequest):
             "transcript_context": req.transcriptContext or "",
             "video_id": req.videoId or "",
             "video_timestamp": req.videoTimestamp or 0.0,
+            "difficulty": req.difficulty or "medium",
         }
 
         result = await invoke_graph(graph, initial_state, req.sessionId)

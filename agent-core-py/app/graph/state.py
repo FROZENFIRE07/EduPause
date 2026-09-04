@@ -48,6 +48,7 @@ class AgentState(TypedDict, total=False):
     # Transcript context (from Node.js backend enrichment)
     transcript_context: str        # The relevant lecture text at the user's playback position
     video_id: str                  # Current video being watched
+    video_title: str               # Current video title
     video_timestamp: float         # Current playback position in seconds
     
     # Mastery tracking
@@ -57,6 +58,12 @@ class AgentState(TypedDict, total=False):
     intervention: Optional[Intervention]  # Socratic question/hint
     recap_summary: str                    # Break recovery recap
     next_content: Optional[NextContent]   # Planner recommendation
+    
+    # Quiz system (checkpoint-based)
+    quiz: Optional[dict]           # Generated quiz with questions array
+    concepts_covered: list[str]    # Concepts from completed video
+    quiz_responses: list[dict]     # User's answers to quiz questions
+    difficulty: str                # Quiz difficulty requested
     
     # Break recovery
     break_duration: str           # Human-readable break duration
